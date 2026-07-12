@@ -32,6 +32,10 @@ python -m pip install -e ".[dev]"
 
 ## 3. Standard commands
 
+Use either `python -m prompt_orchestrator ...` or the installed
+`prompt-orchestrator ...` console script. The console script works when the
+Python Scripts directory is on `PATH`.
+
 ```bash
 pytest
 ruff check .
@@ -45,6 +49,11 @@ Check formatting without modifying files:
 ```bash
 ruff format --check .
 ```
+
+If `prompt-orchestrator` is not found, run the same CLI command with
+`python -m prompt_orchestrator`, or add your Python Scripts directory to
+`PATH`. On Windows, pip commonly installs user scripts in a directory like
+`%APPDATA%\Python\Python312\Scripts`, adjusted for the active Python version.
 
 ## 4. Package conventions
 

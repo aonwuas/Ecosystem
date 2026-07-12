@@ -83,6 +83,11 @@ When documents appear to conflict, use the precedence order in `AGENTS.md`.
 
 ## Intended CLI after completion
 
+The CLI supports two equivalent invocation forms:
+
+- `python -m prompt_orchestrator ...`
+- `prompt-orchestrator ...` when the Python Scripts directory is on `PATH`
+
 ```bash
 # Validate configuration
 prompt-orchestrator config validate --config config.yaml
@@ -105,6 +110,13 @@ prompt-orchestrator run "Draft a project proposal" --trace
 # Emit machine-readable output
 prompt-orchestrator run "Summarize this text: ..." --json
 ```
+
+The examples above use the installed console script. If your shell reports that
+`prompt-orchestrator` is not found, use `python -m prompt_orchestrator ...`
+instead, or add your Python Scripts directory to `PATH`. On Windows, pip may
+install the script under a user directory such as
+`%APPDATA%\Python\Python312\Scripts` or the matching directory for your Python
+version.
 
 ## Configuration quick start
 
