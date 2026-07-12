@@ -55,6 +55,45 @@ def plan_payload(
     }
 
 
+def apology_plan_payload() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "understanding": {
+            "user_goal": "Draft a professional apology email.",
+            "intent": "draft generation",
+            "task_type": "email drafting",
+            "complexity": "simple",
+            "ambiguity": "medium",
+            "risk_level": "low",
+            "risk_categories": [],
+            "missing_information": ["recipient and incident details"],
+            "assumptions": ["The user wants a respectful professional tone."],
+            "uncertainties": ["The exact context of the apology is unspecified."],
+            "concise_rationale": "The user is asking for a polished email draft.",
+        },
+        "clarification": {
+            "action": "proceed",
+            "question": None,
+            "reason": (
+                "A reusable apology email draft can be written with placeholders."
+            ),
+        },
+        "strategy": "draft_generation",
+        "worker_role": "worker",
+        "output_contract": {
+            "mode": "markdown",
+            "structure": "professional email draft",
+            "tone": "respectful and accountable",
+            "length": "medium",
+            "audience": "professional recipient",
+        },
+        "must_include": ["apology", "accountability", "next steps"],
+        "must_avoid": ["defensiveness", "overexplaining"],
+        "quality_criteria": ["Use a respectful tone.", "Keep the email concise."],
+        "critic_required": True,
+    }
+
+
 def critic_pass_payload() -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -384,6 +423,31 @@ def test_understand_json_renders_validated_plan(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload["plan"]["strategy"] == "comparison"
     assert payload["plan"]["worker_role"] == "worker"
+
+
+def test_understand_professional_apology_email_with_correct_schema(
+    tmp_path: Path,
+) -> None:
+    config_path = write_cli_config(
+        tmp_path,
+        [{"expect": "understanding", "respond_json": apology_plan_payload()}],
+    )
+
+    result = cli(
+        "understand",
+        "Help me write a professional apology email.",
+        "--config",
+        str(config_path),
+        "--json",
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["plan"]["strategy"] == "draft_generation"
+    assert payload["plan"]["understanding"]["user_goal"] == (
+        "Draft a professional apology email."
+    )
+    assert payload["plan"]["output_contract"]["mode"] == "markdown"
 
 
 def test_schema_failure_debug_includes_raw_response_but_normal_does_not(

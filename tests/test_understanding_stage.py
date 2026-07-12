@@ -96,6 +96,45 @@ def valid_plan_json(strategy: str = "comparison") -> str:
     )
 
 
+def observed_bad_initial_output() -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "understanding": (
+                "User requests assistance drafting a professional apology email."
+            ),
+            "clarification": None,
+            "strategy": "draft_generation",
+            "worker_role": "worker",
+            "output_contract": "Markdown-formatted email draft.",
+            "quality_criteria": "Tone must be respectful.",
+            "rationale": "The user wants a polished written draft.",
+            "assumptions": ["The apology should be professional."],
+            "uncertainties": ["The specific recipient is unknown."],
+        }
+    )
+
+
+def observed_bad_repair_output() -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "understanding": "User wants a professional apology email.",
+            "clarification": {},
+            "strategy": "draft_generation",
+            "worker_role": "worker",
+            "output_contract": {
+                "format": "Markdown",
+                "content": "Email draft",
+            },
+            "must_include": [],
+            "must_avoid": [],
+            "quality_criteria": ["Use respectful tone."],
+            "critic_required": True,
+        }
+    )
+
+
 def test_intake_normalizes_line_endings_and_context() -> None:
     request = PromptRequest(prompt="  hello\r\nworld  ", context="  context\rtext  ")
 
@@ -138,6 +177,9 @@ def test_understanding_stage_returns_valid_execution_plan() -> None:
     assert client.requests[0].request_kind == "understanding"
     assert "Help me choose" in client.requests[0].messages[1].content
     assert "<USER_REQUEST>" in client.requests[0].messages[1].content
+    assert '"understanding": {' in client.requests[0].messages[1].content
+    assert '"output_contract": {' in client.requests[0].messages[1].content
+    assert "understanding must be an object" in client.requests[0].messages[1].content
     assert (
         "do not answer the user's task"
         in client.requests[0].messages[1].content.lower()
@@ -165,6 +207,40 @@ def test_invalid_first_output_is_repaired_once() -> None:
     assert "<INVALID_RESPONSE>" in repair_prompt
     assert '{"schema_version": 1}' in repair_prompt
     assert any(event.event == "repair_validated" for event in result.trace.events)
+
+
+def test_repair_prompt_addresses_observed_bad_shapes() -> None:
+    client = ScriptedModelClient(
+        [
+            {"expect": "understanding", "text": observed_bad_initial_output()},
+            {"expect": "understanding", "text": observed_bad_repair_output()},
+        ]
+    )
+
+    with pytest.raises(StructuredOutputError) as exc_info:
+        run_understanding_stage(
+            PromptRequest(prompt="Help me write a professional apology email."),
+            config=config(failure_mode="error"),
+            client=client,
+        )
+
+    assert len(client.requests) == 2
+    repair_prompt = client.requests[1].messages[1].content
+    assert '"understanding": {' in repair_prompt
+    assert '"clarification": {' in repair_prompt
+    assert '"output_contract": {' in repair_prompt
+    assert "understanding must be an object" in repair_prompt
+    assert "clarification must include action and reason" in repair_prompt
+    assert (
+        "output_contract must use mode, structure, tone, length, and audience"
+        in repair_prompt
+    )
+    assert "output_contract may not use format or content fields" in repair_prompt
+    assert "Top-level rationale, assumptions, and uncertainties are not allowed" in (
+        repair_prompt
+    )
+    assert "Structured output failed schema validation" in str(exc_info.value)
+    assert "clarification.action" in str(exc_info.value)
 
 
 def test_invalid_repair_follows_error_failure_mode() -> None:
