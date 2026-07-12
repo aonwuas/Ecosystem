@@ -1,0 +1,54 @@
+- expect: understanding
+  respond_json:
+    schema_version: 1
+    understanding:
+      user_goal: Choose the more appropriate database for a small application.
+      intent: decision support
+      task_type: comparison
+      complexity: moderate
+      ambiguity: medium
+      risk_level: low
+      risk_categories: []
+      missing_information:
+        - expected concurrency
+      assumptions:
+        - The application starts small.
+      uncertainties:
+        - Future write concurrency is not specified.
+      concise_rationale: The user needs a conditional technical comparison.
+    clarification:
+      action: proceed
+      question: null
+      reason: A useful comparison can proceed with explicit assumptions.
+    strategy: comparison
+    worker_role: worker
+    output_contract:
+      mode: markdown
+      structure: comparison with recommendation
+      tone: practical
+      length: medium
+      audience: software developer
+    must_include:
+      - tradeoffs
+      - conditional recommendation
+    must_avoid:
+      - pretending future scale is known
+    quality_criteria:
+      - State assumptions.
+      - Compare operational complexity.
+      - Give a conditional recommendation.
+    critic_required: true
+- expect: worker
+  respond_text: |
+    Start with SQLite if the app is small, single-process, or still validating the product. Choose PostgreSQL when concurrent writes, multiple app servers, managed backups, or richer operational controls matter.
+
+    Assumption: the app starts small and future traffic is uncertain. A practical path is to begin with SQLite only if migration cost is low; otherwise choose PostgreSQL early to avoid a later database move.
+- expect: critic
+  respond_json:
+    schema_version: 1
+    passes: true
+    issues: []
+    violated_criteria: []
+    revision_recommended: false
+    revision_instruction: null
+    concise_summary: The draft satisfies the plan and states its assumptions.

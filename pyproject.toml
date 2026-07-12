@@ -36,8 +36,11 @@ Specifications = "README.md"
 packages = ["src/prompt_orchestrator"]
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "-ra -m 'not live'"
 testpaths = ["tests"]
+markers = [
+  "live: opt-in tests that require a configured OpenAI-compatible model endpoint",
+]
 
 [tool.ruff]
 line-length = 88
@@ -56,4 +59,3 @@ files = ["src", "tests"]
 strict = true
 warn_unreachable = true
 pretty = true
-

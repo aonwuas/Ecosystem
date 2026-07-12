@@ -1,0 +1,44 @@
+version: 1
+
+providers:
+  local_llama:
+    type: openai_compatible
+    base_url: http://127.0.0.1:8080/v1
+    api_key_env: null
+    default_headers: {}
+    verify_tls: true
+
+models:
+  local_general:
+    provider: local_llama
+    model: local-model-alias
+    temperature: 0.2
+    max_output_tokens: 4096
+    timeout_seconds: 180
+    extra_body: {}
+    metadata:
+      speed_tier: medium
+      quality_tier: standard
+      cost_tier: local
+
+roles:
+  understanding: local_general
+  worker: local_general
+  critic: local_general
+  revision: local_general
+
+runtime:
+  structured_output_repair_attempts: 1
+  transient_http_retries: 1
+  enable_critic: true
+  strict_critic: false
+  enable_revision: true
+  max_revision_attempts: 1
+  understanding_failure_mode: error
+  default_output_mode: text
+  strategy_overrides: {}
+  trace:
+    enabled_by_default: false
+    include_prompt_summaries: true
+    include_full_prompts: false
+    redact_user_content: false

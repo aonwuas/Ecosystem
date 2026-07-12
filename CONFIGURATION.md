@@ -182,10 +182,13 @@ See `config.example.yaml`.
 ## 11. Validation command
 
 ```bash
-prompt-orchestrator config validate --config config.local.yaml
+python -m prompt_orchestrator config validate --config config.local.yaml
 ```
 
 Successful validation should summarize provider names, model names, and role bindings without printing secrets.
+
+The installed `prompt-orchestrator` console script supports the same arguments
+when the Python Scripts directory is on `PATH`.
 
 ## 12. Future provider compatibility
 

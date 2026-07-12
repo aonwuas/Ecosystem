@@ -30,7 +30,7 @@ The roles may use separate models or all point to the same model. Models may be 
 
 ## MVP capabilities
 
-At completion, the product will:
+The MVP can:
 
 - accept a prompt from the CLI or standard input;
 - normalize the request and preserve conversation context supplied by the caller;
@@ -81,7 +81,18 @@ The repository is governed by the following documents:
 
 When documents appear to conflict, use the precedence order in `AGENTS.md`.
 
-## Intended CLI after completion
+## Installation
+
+Prompt Orchestrator requires Python 3.12 or newer.
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+The editable install provides development tools and the `prompt-orchestrator`
+console script. You can also run the CLI directly as a module.
+
+## CLI Usage
 
 The CLI supports two equivalent invocation forms:
 
@@ -120,7 +131,9 @@ version.
 
 ## Configuration quick start
 
-Copy `config.example.yaml` to a local untracked file such as `config.local.yaml`, then update the model endpoints.
+Copy `config.example.yaml` to a local untracked file such as `config.local.yaml`,
+then update the model endpoint and model alias. A single local model can serve
+all MVP roles:
 
 ```yaml
 providers:
@@ -145,6 +158,60 @@ roles:
 ```
 
 The same configured model may serve every role. Later, each role may be mapped independently to local or hosted models without changing pipeline code.
+
+For a ready-to-edit local llama-server example, see
+[`examples/config.local-llama.yaml`](examples/config.local-llama.yaml). Prompt
+Orchestrator does not start or download models; start your local
+OpenAI-compatible server separately.
+
+## Scripted examples
+
+The repository includes no-network examples using the mock scripted provider:
+
+```bash
+python -m prompt_orchestrator config validate --config examples/config.scripted.yaml
+python -m prompt_orchestrator understand --config examples/config.scripted.yaml "Help me choose between SQLite and PostgreSQL"
+python -m prompt_orchestrator plan --config examples/config.scripted.yaml "Help me choose between SQLite and PostgreSQL"
+python -m prompt_orchestrator run --config examples/config.scripted.yaml "Help me choose between SQLite and PostgreSQL"
+python -m prompt_orchestrator run --config examples/config.scripted.yaml --json "Help me choose between SQLite and PostgreSQL"
+python -m prompt_orchestrator run --config examples/config.scripted.yaml --trace "Help me choose between SQLite and PostgreSQL"
+Get-Content examples/request.txt | python -m prompt_orchestrator run --config examples/config.scripted.yaml --stdin
+```
+
+See [`examples/README.md`](examples/README.md) for the example files and local
+server notes.
+
+## Architecture overview
+
+The runtime is a synchronous CLI pipeline:
+
+```text
+PromptRequest
+  -> intake normalization
+  -> understanding role produces ExecutionPlan JSON
+  -> deterministic schema and policy validation
+  -> clarification/refusal gate or worker prompt planning
+  -> worker generation
+  -> critic review
+  -> optional one-pass revision
+  -> final response and optional trace
+```
+
+Configuration maps roles to named models, and named models to providers. The
+pipeline asks for roles, not URLs or provider-specific payloads.
+
+## Troubleshooting
+
+- If `prompt-orchestrator` is not found, use
+  `python -m prompt_orchestrator ...` or add your Python Scripts directory to
+  `PATH`.
+- If `config validate` reports a missing configuration, pass `--config` or
+  create `config.local.yaml` in the repository root.
+- If a local model call fails, verify that your OpenAI-compatible server is
+  running, the `base_url` ends at `/v1`, and the configured model alias matches
+  the server.
+- API keys should be referenced by environment-variable name in YAML. Do not put
+  real secret values in committed config files.
 
 ## Building the repository with Codex
 

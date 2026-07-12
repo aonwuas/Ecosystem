@@ -49,6 +49,14 @@ Use scripted clients to cover:
 
 Optional and excluded from default test run. They may validate an OpenAI-compatible endpoint when explicitly configured. Mark them with `@pytest.mark.live`.
 
+Run live tests explicitly with:
+
+```bash
+PROMPT_ORCHESTRATOR_LIVE_CONFIG=examples/config.local-llama.yaml pytest -m live
+```
+
+Without `PROMPT_ORCHESTRATOR_LIVE_CONFIG`, the live smoke test skips itself.
+
 ## 3. Test clients
 
 ### MockModelClient

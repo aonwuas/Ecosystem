@@ -147,7 +147,6 @@ JSON mode:
   "error": {
     "code": "CONFIG_ROLE_NOT_FOUND",
     "message": "Role 'critic' references an unknown model.",
-    "stage": "configuration",
     "retryable": false
   }
 }

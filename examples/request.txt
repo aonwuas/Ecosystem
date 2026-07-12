@@ -1,0 +1,1 @@
+Help me choose between SQLite and PostgreSQL for a small app that may later have multiple concurrent users.
