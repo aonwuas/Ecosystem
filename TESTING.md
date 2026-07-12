@@ -139,12 +139,15 @@ By final milestone:
 
 ```bash
 pytest
+pytest --cov=src/prompt_orchestrator --cov-report=term-missing --cov-fail-under=85
 ruff check .
 ruff format --check .
 mypy src
 ```
 
-Target at least 85% line coverage for `src/prompt_orchestrator`, with stronger emphasis on branches in policy, parsing, and error handling. Coverage must not encourage meaningless tests.
+Target at least 85% line coverage for `src/prompt_orchestrator`, with stronger
+emphasis on branches in policy, parsing, and error handling. Coverage must not
+encourage meaningless tests.
 
 ## 9. No test shortcuts
 

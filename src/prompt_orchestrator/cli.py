@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from prompt_orchestrator import __version__
 from prompt_orchestrator.clients import create_pipeline_client
 from prompt_orchestrator.config import load_config, summarize_config
+from prompt_orchestrator.config.models import PromptOrchestratorConfig
 from prompt_orchestrator.domain import PromptRequest
 from prompt_orchestrator.domain.enums import OutputMode
 from prompt_orchestrator.domain.trace import Trace
@@ -140,31 +141,33 @@ def _handle_config_validate(args: argparse.Namespace) -> int:
 
 def _handle_understand(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    include_trace = _include_trace(args, config)
     client = create_pipeline_client(config)
     request = _prompt_request_from_args(args)
     result = run_understanding_stage(request, config=config, client=client)
     if args.json:
         payload = result.validated_plan.model_dump(mode="json")
-        if args.trace:
+        if include_trace:
             payload["trace"] = result.trace.model_dump(mode="json")
         print(render_json(payload))
     else:
         print(render_understand_text(result.validated_plan))
-        if args.trace:
+        if include_trace:
             print(_render_trace_text(result.trace))
     return 0
 
 
 def _handle_plan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    include_trace = _include_trace(args, config)
     client = create_pipeline_client(config)
     runner = PipelineRunner(config=config, client=client)
-    result = runner.plan(_prompt_request_from_args(args), include_trace=args.trace)
+    result = runner.plan(_prompt_request_from_args(args), include_trace=include_trace)
     if args.json:
         print(render_json(_plan_payload(result)))
     else:
         print(render_plan_text(result))
-        if args.trace and result.trace is not None:
+        if include_trace and result.trace is not None:
             print(_render_trace_text(result.trace))
     if result.final_response is None:
         return 0
@@ -173,15 +176,16 @@ def _handle_plan(args: argparse.Namespace) -> int:
 
 def _handle_run(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    include_trace = _include_trace(args, config)
     client = create_pipeline_client(config)
     runner = PipelineRunner(config=config, client=client)
-    result = runner.run(_prompt_request_from_args(args), include_trace=args.trace)
+    result = runner.run(_prompt_request_from_args(args), include_trace=include_trace)
     response = result.final_response
     if args.json:
         print(render_json(response))
     else:
         print(render_final_text(response))
-        if args.trace and response.trace is not None:
+        if include_trace and response.trace is not None:
             print(_render_trace_text(response.trace))
     return _status_exit_code(response.status.value)
 
@@ -202,6 +206,13 @@ def _prompt_request_from_args(args: argparse.Namespace) -> PromptRequest:
         context=args.context,
         requested_output_mode=args.output_mode,
     )
+
+
+def _include_trace(
+    args: argparse.Namespace,
+    config: PromptOrchestratorConfig,
+) -> bool:
+    return bool(args.trace or config.runtime.trace.enabled_by_default)
 
 
 def _plan_payload(result: PipelinePlanResult) -> dict[str, object]:

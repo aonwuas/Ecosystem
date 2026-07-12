@@ -213,6 +213,26 @@ pipeline asks for roles, not URLs or provider-specific payloads.
 - API keys should be referenced by environment-variable name in YAML. Do not put
   real secret values in committed config files.
 
+## MVP completion checklist
+
+- Configuration validation works for mock and OpenAI-compatible providers.
+- The documented CLI commands are implemented: `config validate`, `understand`,
+  `plan`, and `run`.
+- The complete pipeline runs with scripted model responses and no network.
+- A local OpenAI-compatible endpoint can be configured with one model mapped to
+  all roles.
+- Understanding and critic outputs are parsed as structured JSON and validated
+  before use.
+- Clarification and refusal stop before worker execution.
+- Critic-triggered revision is bounded to one pass.
+- Structured-output repair, transient HTTP retry, and revision attempts are
+  bounded by configuration.
+- Traces are in-memory, optional, and sanitized.
+- Default CLI output prints only the final answer or clarification question.
+- Live smoke testing is opt-in with `pytest -m live`.
+- The MVP intentionally excludes RAG, tools, memory, databases, service mode,
+  web UI, streaming, and automatic API escalation.
+
 ## Building the repository with Codex
 
 Implement one milestone at a time. The canonical instruction pattern is:

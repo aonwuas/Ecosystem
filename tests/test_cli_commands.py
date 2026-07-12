@@ -70,6 +70,8 @@ def critic_pass_payload() -> dict[str, object]:
 def write_cli_config(
     tmp_path: Path,
     script: list[dict[str, object]],
+    *,
+    trace_enabled_by_default: bool = False,
 ) -> Path:
     script_path = tmp_path / "script.yaml"
     script_path.write_text(json.dumps(script), encoding="utf-8")
@@ -99,6 +101,11 @@ def write_cli_config(
                     "worker": "scripted_general",
                     "critic": "scripted_general",
                     "revision": "scripted_revision",
+                },
+                "runtime": {
+                    "trace": {
+                        "enabled_by_default": trace_enabled_by_default,
+                    }
                 },
             }
         ),
@@ -187,6 +194,26 @@ def test_run_with_trace_keeps_user_prompt_out_of_trace(tmp_path: Path) -> None:
     assert "worker" in trace
     assert "OPENAI_API_KEY" not in trace
     assert prompt not in trace
+
+
+def test_runtime_trace_default_includes_trace_without_cli_flag(tmp_path: Path) -> None:
+    config_path = write_cli_config(
+        tmp_path,
+        full_run_script(),
+        trace_enabled_by_default=True,
+    )
+
+    result = cli(
+        "run",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(config_path),
+        "--json",
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["trace"]["events"]
 
 
 def test_understand_json_renders_validated_plan(tmp_path: Path) -> None:
