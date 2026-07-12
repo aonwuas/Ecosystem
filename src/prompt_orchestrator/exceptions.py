@@ -80,6 +80,12 @@ class RevisionError(PromptOrchestratorError):
     code = "REVISION_ERROR"
 
 
+class PipelineStateError(PromptOrchestratorError):
+    """A pipeline state transition is not allowed."""
+
+    code = "PIPELINE_STATE_ERROR"
+
+
 class PromptRenderError(PromptOrchestratorError):
     """A package-controlled prompt template could not be rendered."""
 
