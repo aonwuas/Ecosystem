@@ -62,6 +62,12 @@ class PolicyError(PromptOrchestratorError):
     code = "POLICY_ERROR"
 
 
+class WorkerError(PromptOrchestratorError):
+    """Worker prompt planning or generation failed."""
+
+    code = "WORKER_ERROR"
+
+
 class PromptRenderError(PromptOrchestratorError):
     """A package-controlled prompt template could not be rendered."""
 
