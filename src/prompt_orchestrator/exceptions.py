@@ -36,3 +36,9 @@ class ProviderAuthenticationError(ProviderError):
     """A model provider rejected authentication."""
 
     code = "PROVIDER_AUTHENTICATION"
+
+
+class StructuredOutputError(PromptOrchestratorError):
+    """Structured model output could not be extracted or validated."""
+
+    code = "STRUCTURED_OUTPUT_ERROR"
