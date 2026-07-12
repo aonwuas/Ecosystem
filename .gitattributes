@@ -1,22 +1,18 @@
-# Normalize text files to LF in the repository
+# Normalize text files in the repository and store them with LF endings.
 * text=auto eol=lf
 
-# Python and project text files
+# Explicit text formats
 *.py text eol=lf
 *.md text eol=lf
-*.txt text eol=lf
 *.toml text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
 *.json text eol=lf
-*.ini text eol=lf
-*.cfg text eol=lf
+*.txt text eol=lf
 *.sh text eol=lf
-
-# Windows scripts should keep CRLF if added later
+*.ps1 text eol=crlf
 *.bat text eol=crlf
 *.cmd text eol=crlf
-*.ps1 text eol=crlf
 
 # Binary files
 *.png binary
@@ -27,8 +23,3 @@
 *.ico binary
 *.pdf binary
 *.zip binary
-*.gz binary
-*.tar binary
-*.7z binary
-*.sqlite binary
-*.db binary

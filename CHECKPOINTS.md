@@ -1,485 +1,413 @@
-# Checkpoints
+# Implementation Checkpoints
 
-Use these checkpoints to build the MVP incrementally with Codex.
+Implement checkpoints in order. Each checkpoint includes prerequisites, required work, acceptance criteria, and explicit exclusions.
 
-General instruction for every checkpoint:
-
-```text
-Read AGENTS.md, MVP.md, ARCHITECTURE.md, and CHECKPOINTS.md.
-Implement only the requested checkpoint.
-Do not implement later checkpoints.
-Do not add RAG, tools, web UI, database persistence, server mode, or external integrations.
-Add or update tests.
-Run tests.
-Summarize files changed, tests run, and unresolved issues.
-Stop.
-```
-
-## Checkpoint 1: Project Skeleton
+## Milestone 1 — Repository scaffold and developer tooling
 
 ### Goal
 
-Create the initial Python project structure.
+Create an installable, testable Python project with the documented package and CLI names.
 
 ### Implement
 
-- `pyproject.toml`
-- `src/prompt_orchestrator/__init__.py`
-- `src/prompt_orchestrator/cli.py`
-- basic CLI entrypoint named `prompt-orchestrator`
-- `tests/` directory
-- basic pytest smoke tests
-- optional `examples/` directory
+- `pyproject.toml` for Python 3.12+.
+- `src/prompt_orchestrator/` package.
+- `__init__.py`, `__main__.py`, and minimal `cli.py`.
+- `prompt-orchestrator` console entry point.
+- runtime/dev dependency groups matching project decisions.
+- Ruff, mypy, and pytest configuration.
+- smoke tests for import, module invocation, and CLI help.
+- retain and reference all specification documents.
 
-### Do Not Implement
+### Acceptance
 
-- classifier
-- pipeline
-- model client
-- prompt templates
-- RAG
-- tools
+- editable install succeeds;
+- `prompt-orchestrator --help` succeeds;
+- `python -m prompt_orchestrator --help` succeeds;
+- pytest, Ruff, formatting check, and mypy pass for scaffold.
 
-### Acceptance Criteria
+### Do not implement
 
-- Package imports successfully.
-- CLI help command runs.
-- `pytest` passes.
-- README remains consistent with the project.
+Domain schemas, config loading, model clients, prompts, or pipeline logic.
 
 ---
 
-## Checkpoint 2: Core Data Models
+## Milestone 2 — Canonical domain models and enums
 
 ### Goal
 
-Define the structured objects that flow through the pipeline.
+Implement Pydantic models and enums from `DATA_MODELS.md`.
 
 ### Implement
 
-Core models such as:
+- request/intake models;
+- understanding, clarification, output contract, and execution-plan models;
+- provider-neutral model request/response models;
+- draft, critic, quality, final-response, and trace models;
+- strict field validation, bounds, consistency validators, JSON serialization;
+- unit tests with valid/invalid examples.
 
-- `PromptRequest`
-- `NormalizedPrompt`
-- `PromptClassification`
-- `ClarificationDecision`
-- `ResponseStrategyDecision`
-- `PromptPlan`
-- `GenerationResult`
-- `QualityCheckResult`
-- `FinalResponse`
+### Acceptance
 
-Use dataclasses or Pydantic. Prefer dataclasses unless validation complexity justifies Pydantic.
+- documented JSON examples validate;
+- unknown enum values fail clearly;
+- clarification and critic consistency rules are enforced;
+- secret-bearing values are not part of domain models.
 
-### Required Traits
+### Do not implement
 
-- serializable to dict/JSON
-- typed fields
-- clear enum/string values
-- sensible defaults where appropriate
-
-### Acceptance Criteria
-
-- Models can be instantiated in tests.
-- Models serialize to dictionaries.
-- Tests cover representative valid objects.
-- Invalid or unknown enum-like values are handled clearly if validation is implemented.
+Config loading, model calls, parsing raw model text, or pipeline stages.
 
 ---
 
-## Checkpoint 3: Prompt Intake
+## Milestone 3 — YAML configuration and role resolution
 
 ### Goal
 
-Normalize incoming prompts and extract simple surface-level constraints.
+Load and validate providers, named models, role bindings, and runtime policy.
 
 ### Implement
 
-- intake function/class
-- whitespace normalization
-- empty prompt handling
-- requested output format detection
-- simple explicit constraint extraction
+- discriminated provider config for `mock` and `openai_compatible`;
+- named model config;
+- all four role bindings;
+- runtime retry/critic/revision/trace settings;
+- environment-variable secret resolution with redaction;
+- config search order;
+- role → model → provider resolver;
+- `config validate` CLI subcommand;
+- sanitized config summary;
+- tests for valid and invalid configurations.
 
-Examples of constraints/output format:
+### Acceptance
 
-- “be concise”
-- “use bullets”
-- “return JSON”
-- “make it professional”
-- “friendly tone”
-- “step by step”
+- `config.example.yaml` validates;
+- missing provider/model/role references fail before network use;
+- absent optional local API key works;
+- required missing environment key fails without exposing values;
+- role resolution is independently testable.
 
-### Acceptance Criteria
+### Do not implement
 
-- Empty prompt is detected.
-- Whitespace is normalized without losing original prompt.
-- Requested JSON/bullets/numbered list can be detected.
-- Tone/length constraints can be detected for obvious cases.
-- Tests pass.
+HTTP model calls or pipeline stages.
 
 ---
 
-## Checkpoint 4: Deterministic Classifier
+## Milestone 4 — Model client abstraction and provider adapters
 
 ### Goal
 
-Classify prompts without calling an LLM.
+Provide provider-neutral generation through mock and OpenAI-compatible clients.
 
 ### Implement
 
-- intent classification
-- task type classification
-- complexity classification
-- ambiguity detection
-- missing information detection
-- risk/sensitivity detection
+- `ModelClient` protocol/abstract interface;
+- client factory;
+- `MockModelClient` and `ScriptedModelClient`;
+- OpenAI-compatible chat-completions client using HTTPX;
+- request payload mapping;
+- response/usage parsing;
+- timeout and transient retry behavior;
+- provider exception mapping and sanitization;
+- HTTP mock tests.
 
-Task types should include at least:
+### Acceptance
 
-- `qa`
-- `explanation`
-- `writing`
-- `rewrite`
-- `summarization`
-- `translation`
-- `brainstorming`
-- `planning`
-- `analysis`
-- `comparison`
-- `decision_support`
-- `classification`
-- `extraction`
-- `structured_output`
-- `creative_generation`
-- `technical_help`
-- `debugging`
-- `conversation`
-- `unknown`
+- no pipeline code knows URLs or HTTP payloads;
+- scripted client verifies call order;
+- local endpoint may omit API key;
+- transport retry is bounded;
+- provider errors do not expose secrets.
 
-### Acceptance Criteria
+### Do not implement
 
-Tests cover at least:
-
-- direct Q&A
-- explanation
-- rewrite request with provided text
-- rewrite request missing text
-- summarization request
-- planning request
-- comparison request
-- brainstorming request
-- high-stakes financial/legal/medical prompt
-- dangerous instruction prompt
-- ambiguous “make this better” prompt
+Understanding prompts, critic prompts, or full pipeline.
 
 ---
 
-## Checkpoint 5: Clarification Gate
+## Milestone 5 — Structured-output extraction and validation
 
 ### Goal
 
-Decide whether the system should answer now, ask a follow-up, proceed with assumptions, or refuse/redirect.
+Robustly convert model text into validated understanding and critic objects.
 
 ### Implement
 
-Clarification actions:
+- optional Markdown-fence removal;
+- extraction of one top-level JSON object from limited surrounding prose;
+- JSON parse errors with paths/context;
+- Pydantic validation integration;
+- structured-output repair request data;
+- one-repair budget helper;
+- tests for valid, fenced, noisy, malformed, truncated, missing-field, and extra-field outputs.
 
-- `answer_now`
-- `ask_followup`
-- `proceed_with_assumptions`
-- `refuse_or_redirect`
+### Acceptance
 
-The gate should consider:
+- valid JSON is parsed directly;
+- common fenced JSON is accepted;
+- ambiguous/multiple top-level objects are rejected;
+- invalid schemas produce concise repair diagnostics;
+- no use of `eval` or permissive code execution.
 
-- ambiguity level
-- missing information
-- task type
-- risk/sensitivity
-- whether assumptions would be safe
+### Do not implement
 
-### Acceptance Criteria
-
-- “Make this better” without target text asks for text.
-- “Write a reply” without message asks for the message or context.
-- A planning prompt with mild missing detail proceeds with assumptions.
-- Dangerous instruction prompts refuse/redirect.
-- High-stakes prompts proceed cautiously rather than asking unnecessary questions.
-- Tests pass.
+Actual repair model call or orchestration.
 
 ---
 
-## Checkpoint 6: Response Strategy Selector
+## Milestone 6 — Strategy registry and prompt-template system
 
 ### Goal
 
-Choose the response strategy and logical model role.
+Define the bounded strategy set and render package-controlled prompts.
 
 ### Implement
 
-Strategies:
+- static strategy definitions for every MVP strategy;
+- metadata for supported output modes, default quality criteria, and critic recommendation;
+- package templates for understanding, worker strategies, critic, and revision;
+- template loader restricted to package paths;
+- `string.Template` renderer with allowed variables and missing-variable errors;
+- stable user/context delimiters;
+- prompt structural tests.
 
-- `direct_answer`
-- `step_by_step_explanation`
-- `structured_analysis`
-- `pros_cons_comparison`
-- `decision_support`
-- `draft_generation`
-- `rewrite_with_preserved_meaning`
-- `summarization`
-- `brainstorm_options`
-- `plan_generation`
-- `classification_response`
-- `extraction_response`
-- `structured_output_response`
-- `clarify_first`
-- `safety_redirect`
+### Acceptance
 
-Model roles:
+- every registered strategy has one worker template;
+- unknown strategy/template is rejected;
+- user input cannot select a path;
+- rendered prompts include required contracts and delimiters;
+- no template requests hidden chain-of-thought.
 
-- `generalist`
-- `writer`
-- `rewriter`
-- `summarizer`
-- `planner`
-- `analyst`
-- `critic`
-- `safety`
+### Do not implement
 
-### Acceptance Criteria
-
-- Each major task type maps to an expected strategy.
-- Clarification decision `ask_followup` maps to `clarify_first`.
-- Refuse/redirect maps to `safety_redirect`.
-- High-stakes decision prompts map to `decision_support`.
-- Tests cover every strategy.
+Model calls or pipeline stages.
 
 ---
 
-## Checkpoint 7: Prompt Template System
+## Milestone 7 — Intake and understanding stage
 
 ### Goal
 
-Build optimized internal prompts from selected strategies.
+Accept user input and obtain a validated model-produced execution plan.
 
 ### Implement
 
-- prompt template registry
-- template rendering
-- templates for all MVP strategies
-- `PromptPlan` construction
+- intake normalization and empty-input validation;
+- understanding prompt construction;
+- understanding role resolution and call;
+- structured parsing and validation;
+- one structured-output repair call;
+- safe fallback/error behavior from config;
+- trace events for attempts and fallback;
+- unit/integration tests using scripted clients.
 
-Each rendered prompt should include:
+### Acceptance
 
-- original prompt
-- normalized prompt
-- intent
-- task type
-- complexity
-- risk/sensitivity
-- explicit constraints
-- requested output format
-- assumptions
-- strategy-specific instructions
+- a valid execution plan is returned;
+- invalid first output can be repaired once;
+- invalid repair follows configured failure mode;
+- fallback is visibly marked;
+- understanding stage does not answer the user's task.
 
-### Acceptance Criteria
+### Do not implement
 
-- Every strategy has a template.
-- Missing template returns a clear error.
-- Rendered prompts include required fields.
-- Tests verify template rendering for several task types.
-- No model calls are required.
+Worker, critic, revision, or full CLI run.
 
 ---
 
-## Checkpoint 8: Model Client Abstraction
+## Milestone 8 — Deterministic execution-plan policy and clarification gate
 
 ### Goal
 
-Allow generation without binding the runtime to a specific model provider.
+Constrain model-produced control decisions before execution.
 
 ### Implement
 
-- `ModelClient` protocol/interface
-- `MockModelClient`
-- simple generation request/response objects if needed
-- optional config object for future real providers
+- strategy and role registration checks;
+- caller output-mode override handling;
+- clarification consistency and policy;
+- high-risk critic enforcement;
+- bounded list/string normalization and deduplication;
+- policy change/warning recording;
+- proceed, clarification, and refusal outcomes;
+- tests for policy corrections and rejections.
 
-Do not require live model endpoints.
+### Acceptance
 
-### Acceptance Criteria
+- unregistered strategy or role cannot execute;
+- model cannot disable required policy;
+- clarification produces one focused question;
+- a valid proceed plan remains semantically intact;
+- all modifications appear in `policy_changes`.
 
-- Tests use `MockModelClient`.
-- Mock client can return deterministic responses.
-- Mock client can simulate failure.
-- Pipeline code can depend on the interface, not a concrete provider.
-- Tests pass without network access.
+### Do not implement
+
+Worker or critic model calls.
 
 ---
 
-## Checkpoint 9: Generation Pipeline
+## Milestone 9 — Worker prompt planning and generation stage
 
 ### Goal
 
-Run the core path from prompt to generated draft.
+Turn a validated execution plan into a worker prompt and draft answer.
 
 ### Implement
 
-Pipeline stages:
+- `PromptPlan` builder;
+- strategy-template selection;
+- output contract and constraints insertion;
+- worker role resolution;
+- worker model call;
+- empty-output handling;
+- `plan` operation that returns prompt plan without calling worker;
+- tests for representative strategies and caller context.
 
-1. intake
-2. classification
-3. clarification decision
-4. strategy selection
-5. prompt plan generation
-6. draft generation through model client
+### Acceptance
 
-The pipeline should stop early if clarification or refusal is required.
+- worker receives the correct strategy prompt;
+- user content remains delimited;
+- `plan` performs no worker call;
+- worker result becomes a valid `DraftResponse`;
+- clarification/refusal plans never call worker.
 
-### Acceptance Criteria
+### Do not implement
 
-- Normal prompts produce a `GenerationResult`.
-- Ambiguous prompts return a clarification-style `FinalResponse` or equivalent early stop result.
-- Dangerous prompts return a safety redirect result.
-- Pipeline trace is available for debugging/tests.
-- Tests cover normal, ambiguous, and safety cases.
+Critic or revision.
 
 ---
 
-## Checkpoint 10: Lightweight Quality Check
+## Milestone 10 — Critic and one-pass revision stages
 
 ### Goal
 
-Review generated draft before finalization.
+Evaluate the draft and optionally revise it once.
 
 ### Implement
 
-- quality check function/class
-- deterministic checks for obvious issues
-- optional one-pass revision with the mock model
-- `QualityCheckResult`
+- critic prompt construction and role call;
+- critic structured parsing, repair, and consistency validation;
+- strict/non-strict critic failure behavior;
+- revision decision;
+- revision prompt and role call;
+- one-pass revision budget enforcement;
+- deterministic final checks on revised text;
+- preservation of original draft on revision failure;
+- comprehensive scripted integration tests.
 
-Checks should include:
+### Acceptance
 
-- empty response
-- ignored requested output format where detectable
-- high-stakes answer lacks caution
-- clarification was required but ignored
-- response does not address prompt in obvious cases if detectable
-
-### Acceptance Criteria
-
-- Passing response passes.
-- Empty response fails.
-- Missing requested JSON/bullets can fail when requested.
-- High-stakes response without caution can fail.
-- At most one revision pass is allowed.
-- Tests pass.
+- critic pass returns original draft;
+- critic revision recommendation can produce revised draft;
+- no second critic/revision loop occurs;
+- critic failure degrades or fails according to config;
+- revision failure preserves original answer with warning.
 
 ---
 
-## Checkpoint 11: Finalizer and Full Pipeline
+## Milestone 11 — Pipeline runner, state machine, finalizer, and trace
 
 ### Goal
 
-Return a complete final response object from the full pipeline.
+Connect all stages into one application service independent of CLI presentation.
 
 ### Implement
 
-- finalization logic
-- assumption/limitation handling
-- final text selection
-- quality check integration
-- full pipeline runner
+- explicit pipeline state model and legal transitions;
+- `PipelineRunner` operations: understand, plan, run;
+- final response construction for completed, clarification, refusal, degraded, and failed paths;
+- in-memory trace collector with timing and attempts;
+- secret redaction and prompt-summary behavior;
+- deterministic final checks;
+- end-to-end scripted tests.
 
-### Acceptance Criteria
+### Acceptance
 
-- `run()` returns `FinalResponse`.
-- Final response includes final text, strategy, assumptions, limitations, and quality result.
-- Clarification outputs are formatted cleanly.
-- Safety redirect outputs are formatted cleanly.
-- Tests cover full end-to-end behavior with mock client.
+- each major outcome returns a valid `FinalResponse`;
+- illegal state transitions fail in tests;
+- trace is optional and sanitized;
+- pipeline API contains no CLI-specific printing;
+- every loop/retry is bounded.
 
 ---
 
-## Checkpoint 12: CLI Commands
+## Milestone 12 — Complete CLI and output rendering
 
 ### Goal
 
-Expose the MVP through a usable CLI.
+Expose the MVP through a usable command line.
 
 ### Implement
 
-Commands:
+- commands: `config validate`, `understand`, `plan`, `run`;
+- prompt argument and `--stdin` support;
+- optional context input;
+- `--config`, `--json`, `--trace`, and debug controls defined by specs;
+- clean text renderer;
+- structured JSON renderer;
+- stable exit codes and concise errors;
+- CLI tests.
 
-- `prompt-orchestrator classify "..."`
-- `prompt-orchestrator plan "..."`
-- `prompt-orchestrator run "..."`
-- `--json` option for structured output where appropriate
+### Acceptance
 
-### Acceptance Criteria
-
-- CLI commands work.
-- CLI commands return nonzero exit code for invalid input where appropriate.
-- `classify` prints classification.
-- `plan` prints prompt plan.
-- `run` prints final response.
-- `--json` prints valid JSON.
-- CLI tests pass.
+- documented README commands work;
+- default run prints only user-facing result;
+- clarification prints the question;
+- JSON output is valid and contains status metadata;
+- trace does not reveal secrets;
+- stack traces require explicit debug mode.
 
 ---
 
-## Checkpoint 13: Examples and README Polish
+## Milestone 13 — Examples, optional live smoke test, and documentation synchronization
 
 ### Goal
 
-Make the MVP understandable and demonstrable.
+Make the completed MVP understandable and easy to validate with local models.
 
 ### Implement
 
-- examples for different prompt types
-- README usage section
-- README architecture summary
-- README non-goals reminder
-- example CLI outputs if practical
+- example scripted model fixtures;
+- example local llama-server configuration;
+- examples for all major CLI operations;
+- optional `live` pytest marker/smoke test;
+- README installation, configuration, usage, troubleshooting, and architecture overview;
+- ensure all specification docs match implementation.
 
-Example categories:
+### Acceptance
 
-- ambiguous rewrite
-- planning
-- comparison
-- brainstorming
-- high-stakes decision support
-- summarization
-- explanation
-
-### Acceptance Criteria
-
-- README explains what the MVP does.
-- README explains what is intentionally not included.
-- Examples can be run manually.
-- Tests still pass.
+- a new user can configure one local model for all roles;
+- examples run with scripted clients without network;
+- live test is opt-in;
+- no doc claims unimplemented features.
 
 ---
 
-## Checkpoint 14: Cleanup and Consistency Pass
+## Milestone 14 — Hardening and MVP completion audit
 
 ### Goal
 
-Clean up the MVP without adding scope.
+Finish the MVP without adding scope.
 
 ### Implement
 
-- remove dead code
-- improve naming consistency
-- ensure object serialization is consistent
-- ensure docs match CLI behavior
-- ensure tests are organized
-- ensure no out-of-scope features were added
+- run and fix complete quality gates;
+- achieve testing target with meaningful tests;
+- audit secret redaction, retry limits, trace output, and schema strictness;
+- audit Windows/Linux path and line-ending behavior;
+- remove dead code and accidental future-feature stubs;
+- verify package metadata and version;
+- produce an MVP completion checklist in README or release notes section.
 
-### Acceptance Criteria
+### Acceptance
 
-- Full test suite passes.
-- README, MVP, ARCHITECTURE, and CHECKPOINTS are consistent.
-- No RAG/tools/server/database/web UI code exists.
-- The CLI demonstrates the full MVP.
+- `pytest` passes;
+- `ruff check .` passes;
+- `ruff format --check .` passes;
+- `mypy src` passes;
+- coverage target is met;
+- config example validates;
+- full scripted pipeline passes;
+- prohibited features are absent;
+- repository is ready for manual local-model testing.

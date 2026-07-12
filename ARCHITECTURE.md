@@ -1,391 +1,362 @@
 # Architecture
 
-## Overview
+## 1. Architectural style
 
-Prompt Orchestrator is a CLI-first orchestration runtime that improves LLM interactions by converting a raw user prompt into a structured response process.
+Prompt Orchestrator is a synchronous, CLI-first pipeline composed of explicit stages. The architecture favors small interfaces, immutable validated data, and deterministic policy around model-produced decisions.
 
-The MVP does not use RAG or tools. It relies on prompt intake, deterministic classification, strategy selection, internal prompt construction, model abstraction, and lightweight quality checking.
+The MVP is not an autonomous agent framework. Models generate text and structured plans; application code controls all stage transitions.
 
-```text
-User Prompt
-  -> Prompt Intake
-  -> Deterministic Classifier
-  -> Clarification Gate
-  -> Strategy Selector
-  -> Prompt Builder
-  -> Model Client
-  -> Quality Checker
-  -> Finalizer
-  -> Final Response
-```
-
-## Design Principles
-
-- Keep the MVP small and testable.
-- Use deterministic rules before model-based routing.
-- Keep model calls behind an interface.
-- Keep internal state serializable.
-- Make each pipeline phase independently testable.
-- Allow future expansion without implementing future features now.
-- Do not add RAG, tools, web UI, database, or server mode.
-
-## Core Modules
-
-Target module structure:
+## 2. System context
 
 ```text
-src/prompt_orchestrator/
-  __init__.py
-  cli.py
-  models.py
-  intake.py
-  classifier.py
-  clarification.py
-  strategies.py
-  prompt_templates.py
-  model_client.py
-  pipeline.py
-  quality.py
-  finalizer.py
+Human or calling script
+        │
+        ▼
+Prompt Orchestrator CLI
+        │
+        ├── YAML configuration
+        ├── environment variables for secrets
+        └── configured model endpoints
+                ├── local llama-server
+                └── future hosted OpenAI-compatible API
 ```
 
-Additional helper modules may be added if they simplify the implementation, but avoid unnecessary abstractions.
-
-## Core Data Flow
-
-### 1. PromptRequest
-
-Created from user input.
-
-Expected fields:
-
-- raw prompt
-- optional conversation context
-- optional user constraints
-- optional requested format
-- optional metadata
-
-The MVP may only support raw prompt from the CLI, but the object should allow future expansion.
-
-### 2. PromptIntake
-
-Normalizes the prompt and extracts simple surface-level facts.
-
-Responsibilities:
-
-- trim and normalize whitespace
-- detect empty prompts
-- detect explicit output format requests
-- extract obvious constraints such as “be concise,” “use bullets,” “make it professional,” “return JSON”
-- preserve the original prompt exactly
-
-Output should update or create a normalized request object.
-
-### 3. PromptClassification
-
-Classifies the normalized request.
-
-Responsibilities:
-
-- intent classification
-- task type classification
-- complexity estimation
-- ambiguity detection
-- missing information detection
-- risk/sensitivity detection
-- output format detection if not already found during intake
-
-Classification should be deterministic in the MVP.
-
-### 4. ClarificationDecision
-
-Decides whether the system should continue or stop to ask a question.
-
-Possible actions:
-
-- `answer_now`
-- `ask_followup`
-- `proceed_with_assumptions`
-- `refuse_or_redirect`
-
-Responsibilities:
-
-- ask a follow-up only when the task cannot be completed usefully
-- proceed with assumptions when safe
-- route unsafe prompts to safety redirect
-- create a concise follow-up question when needed
-- create assumptions when proceeding despite missing details
-
-### 5. ResponseStrategy
-
-Selects how the answer should be generated.
-
-Examples:
-
-- `direct_answer`
-- `step_by_step_explanation`
-- `structured_analysis`
-- `pros_cons_comparison`
-- `decision_support`
-- `draft_generation`
-- `rewrite_with_preserved_meaning`
-- `summarization`
-- `brainstorm_options`
-- `plan_generation`
-- `classification_response`
-- `extraction_response`
-- `structured_output_response`
-- `clarify_first`
-- `safety_redirect`
-
-The strategy should determine:
-
-- prompt template
-- model role
-- whether quality check is required
-- whether a cautious tone is required
-- whether assumptions should be shown
-
-### 6. PromptPlan
-
-The PromptPlan is the structured plan for model generation.
-
-Expected fields:
-
-- original prompt
-- normalized prompt
-- selected strategy
-- model role
-- prompt template name
-- assumptions
-- constraints
-- requested output format
-- internal prompt text
-- quality check required flag
-
-The plan is what the `plan` CLI command should display.
-
-### 7. ModelClient
-
-The model client abstracts generation.
-
-MVP requirements:
-
-- define a protocol/interface
-- implement MockModelClient
-- optionally implement a simple OpenAI-compatible client only if it does not complicate tests
-- tests must use the mock client
-
-The rest of the pipeline should not know whether the client is mock or real.
-
-### 8. GenerationResult
-
-Captures the model output.
-
-Expected fields:
-
-- text
-- model role
-- prompt template name
-- raw model metadata if available
-- whether generation succeeded
-- error message if generation failed
-
-### 9. QualityCheckResult
-
-Evaluates the generated draft.
-
-Expected fields:
-
-- passed
-- issues
-- revision_needed
-- revised_prompt, optional
-- reason
-
-The MVP may implement deterministic quality checks and/or use the mock model to simulate a critic.
-
-At most one revision pass is allowed.
-
-### 10. FinalResponse
-
-The final object returned by the pipeline.
-
-Expected fields:
-
-- final text
-- action taken
-- classification summary
-- strategy
-- assumptions
-- limitations
-- quality check result
-- pipeline trace, optional
-
-## CLI Architecture
-
-The CLI should be a thin layer over pipeline functions.
-
-Commands:
-
-### classify
-
-Input:
-
-```bash
-prompt-orchestrator classify "..."
-```
-
-Output:
-
-- structured classification
-- JSON option if implemented
-
-### plan
-
-Input:
-
-```bash
-prompt-orchestrator plan "..."
-```
-
-Output:
-
-- classification
-- clarification decision
-- selected strategy
-- model role
-- template name
-- assumptions
-- internal prompt preview
-
-### run
-
-Input:
-
-```bash
-prompt-orchestrator run "..."
-```
-
-Output:
-
-- final answer or clarification question
-
-With `--json`, output structured response.
-
-## Template Architecture
-
-Prompt templates should be plain text files or Python string constants.
-
-A simple implementation may use Python dictionaries first. If template files are used, place them under:
+## 3. Canonical pipeline
 
 ```text
-src/prompt_orchestrator/templates/
+PromptRequest
+    │
+    ▼
+IntakeStage
+    │ IntakeResult
+    ▼
+UnderstandingStage ──calls──> understanding role
+    │ raw structured response
+    ▼
+StructuredOutputParser
+    │ candidate ExecutionPlan
+    ▼
+ExecutionPlanValidator + PolicyEngine
+    │ ValidatedExecutionPlan
+    ├──────── clarification/refusal ───────> Finalizer
+    │
+    ▼
+StrategyRegistry + PromptBuilder
+    │ WorkerPrompt
+    ▼
+WorkerStage ──calls──> worker role
+    │ DraftResponse
+    ▼
+CriticStage ──calls──> critic role
+    │ CriticResult
+    ├──────── pass/no revision ────────────> Finalizer
+    │
+    ▼
+RevisionStage ──calls once──> revision role
+    │ RevisedDraft
+    ▼
+DeterministicFinalChecks
+    │
+    ▼
+Finalizer
+    │ FinalResponse + optional Trace
+    ▼
+CLI renderer
 ```
 
-Each strategy should have a template.
-
-Templates should receive:
-
-- original prompt
-- task type
-- intent
-- complexity
-- risk
-- constraints
-- requested output format
-- assumptions
-- strategy-specific instructions
-
-## Deterministic Classifier Architecture
-
-The classifier should use explicit rules.
-
-Suggested approach:
-
-1. Lowercase prompt for rule matching.
-2. Detect high-stakes/risk keywords.
-3. Detect missing-content ambiguity patterns.
-4. Detect task type by keyword and structure.
-5. Detect intent from task type.
-6. Estimate complexity from risk/task/wording.
-7. Extract explicit constraints.
-8. Return a structured classification object.
-
-The classifier does not need to be perfect. It needs to be predictable and testable.
-
-## Strategy Selector Architecture
-
-The strategy selector maps classification + clarification decision to response strategy.
-
-Example mappings:
+## 4. Proposed repository layout
 
 ```text
-ask_followup -> clarify_first
-risk dangerous_instructions -> safety_redirect
-rewrite -> rewrite_with_preserved_meaning
-summarization -> summarization
-planning -> plan_generation
-comparison -> pros_cons_comparison
-financial/legal/medical high-stakes -> decision_support
-explanation -> step_by_step_explanation
-analysis -> structured_analysis
-brainstorming -> brainstorm_options
-qa -> direct_answer
+.
+├── AGENTS.md
+├── ARCHITECTURE.md
+├── CHECKPOINTS.md
+├── CODEX_INSTRUCTIONS.md
+├── CONFIGURATION.md
+├── DATA_MODELS.md
+├── DEVELOPMENT.md
+├── ERROR_HANDLING.md
+├── MVP.md
+├── PROJECT_DECISIONS.md
+├── PROMPT_CONTRACTS.md
+├── README.md
+├── SECURITY.md
+├── TESTING.md
+├── config.example.yaml
+├── pyproject.toml
+├── src/
+│   └── prompt_orchestrator/
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── cli.py
+│       ├── exceptions.py
+│       ├── config/
+│       │   ├── loader.py
+│       │   ├── models.py
+│       │   └── validation.py
+│       ├── domain/
+│       │   ├── enums.py
+│       │   ├── execution_plan.py
+│       │   ├── requests.py
+│       │   ├── results.py
+│       │   └── trace.py
+│       ├── clients/
+│       │   ├── base.py
+│       │   ├── factory.py
+│       │   ├── mock.py
+│       │   └── openai_compatible.py
+│       ├── parsing/
+│       │   ├── json_extract.py
+│       │   └── structured.py
+│       ├── policy/
+│       │   ├── execution_plan.py
+│       │   └── safety.py
+│       ├── prompts/
+│       │   ├── loader.py
+│       │   └── renderer.py
+│       ├── strategies/
+│       │   ├── definitions.py
+│       │   └── registry.py
+│       ├── stages/
+│       │   ├── intake.py
+│       │   ├── understanding.py
+│       │   ├── worker.py
+│       │   ├── critic.py
+│       │   ├── revision.py
+│       │   └── finalizer.py
+│       ├── pipeline/
+│       │   ├── runner.py
+│       │   └── state.py
+│       └── templates/
+│           ├── understanding.md
+│           ├── critic.md
+│           ├── revision.md
+│           └── strategies/
+│               ├── direct_answer.md
+│               └── ...
+└── tests/
+    ├── fixtures/
+    ├── unit/
+    └── integration/
 ```
 
-## Quality Checker Architecture
+Codex may adjust filenames modestly when tests or packaging benefit, but component boundaries must remain recognizable.
 
-Quality check should be deliberately lightweight.
+## 5. Component responsibilities
 
-The MVP should check:
+### 5.1 CLI
 
-- empty response
-- generated response when clarification was required
-- missing requested JSON/bullets/numbered list format if requested
-- high-stakes answer lacks caution language
-- response ignores explicit brevity/professional tone constraints where detectable
+Responsible for:
 
-The quality checker may return pass/fail with issues.
+- argument parsing;
+- reading prompt/context from arguments or stdin;
+- loading configuration;
+- invoking pipeline operations;
+- rendering clean text, JSON, or trace output;
+- translating domain exceptions into stable exit codes.
 
-If revision is enabled, allow only one revision.
+The CLI contains no provider-specific logic and no orchestration policy.
 
-## Error Handling
+### 5.2 Configuration layer
 
-The system should handle:
+Responsible for:
 
-- empty prompt
-- unsupported command
-- template missing
-- model client failure
-- quality check failure
+- loading YAML;
+- resolving environment-variable references;
+- validating providers, models, and role bindings;
+- producing immutable runtime settings;
+- preventing model calls when config is invalid.
 
-Errors should be user-readable and testable.
+### 5.3 ModelClient interface
 
-## Serialization
+Conceptual interface:
 
-Core objects should be serializable to dictionaries/JSON.
+```text
+generate(request: ModelRequest) -> ModelResponse
+```
 
-This supports:
+A model request contains normalized messages, sampling parameters, output limits, timeout settings, and optional structured-output hints.
 
-- CLI `--json`
-- tests
-- future logging
-- future UI/server mode
+The interface must not expose HTTPX types to pipeline code.
 
-Do not add persistence in the MVP.
+### 5.4 Client factory
 
-## Future Extension Points
+Constructs one client per provider configuration and resolves a logical role through:
 
-Future features may include:
+```text
+role → named model → provider → client
+```
 
-- RAG
-- tool use
-- model routing across multiple endpoints
-- memory
-- server mode
-- web UI
-- user profiles
-- multi-pass planner/critic loops
+### 5.5 IntakeStage
 
-The MVP should leave clean interfaces for these but must not implement them.
+Normalizes line endings and surrounding whitespace, validates presence of a prompt, preserves supplied context, and creates `PromptRequest`/`IntakeResult` data.
+
+It does not interpret user intent.
+
+### 5.6 UnderstandingStage
+
+Builds the understanding prompt, calls the configured role, parses structured output, and requests one repair attempt when parsing fails.
+
+It does not execute the model-selected plan directly.
+
+### 5.7 ExecutionPlanValidator
+
+Validates the plan against `DATA_MODELS.md` and deterministic policy:
+
+- known enums;
+- known strategy ID;
+- available role;
+- internal consistency;
+- supported output contract;
+- bounded list/string sizes;
+- required caution for sensitive categories;
+- clarification rules.
+
+It returns a validated plan, a policy-modified plan with recorded changes, or a controlled failure/fallback.
+
+### 5.8 StrategyRegistry
+
+A static application registry maps strategy IDs to:
+
+- prompt-template path;
+- description;
+- supported output modes;
+- default quality criteria;
+- whether empathy/caution language is required;
+- whether a critic is recommended.
+
+Models cannot define new strategy IDs at runtime.
+
+### 5.9 PromptBuilder
+
+Creates worker prompts from validated data. It uses stable delimiters and escapes/rejects missing placeholders. It must never treat user content as a prompt-template file path or configuration key.
+
+### 5.10 WorkerStage
+
+Resolves the worker role, calls the model, and creates a `DraftResponse`. It does not decide whether its own answer is sufficient.
+
+### 5.11 CriticStage
+
+Builds a structured evaluation prompt from the original request, plan, and draft. It parses and validates a `CriticResult` and never exposes hidden reasoning.
+
+### 5.12 RevisionStage
+
+Runs only when:
+
+- critic result is valid;
+- revision is enabled;
+- critic recommends revision;
+- revision budget remains.
+
+It runs once. The revised draft receives deterministic final checks, not a second critic call.
+
+### 5.13 Finalizer
+
+Selects the final visible answer and adds material assumptions or warnings according to policy. It creates a `FinalResponse` independent of CLI rendering.
+
+### 5.14 TraceCollector
+
+Collects structured events and durations for the current run. It redacts secrets and does not persist data.
+
+## 6. Pipeline state machine
+
+Allowed states:
+
+```text
+NEW
+→ INTAKE_COMPLETE
+→ UNDERSTANDING_COMPLETE
+→ PLAN_VALIDATED
+→ CLARIFICATION_REQUIRED | REFUSED | WORKER_COMPLETE
+→ CRITIC_COMPLETE | CRITIC_SKIPPED | CRITIC_FAILED
+→ REVISION_COMPLETE | REVISION_SKIPPED | REVISION_FAILED
+→ FINALIZED
+
+Any state may transition to FAILED for an unrecoverable error.
+```
+
+Illegal transitions must raise a domain error in tests and development builds.
+
+## 7. Model-role resolution
+
+The pipeline asks for a role such as `understanding`. Configuration resolves it:
+
+```text
+understanding
+    ↓
+model name: local_general
+    ↓
+provider name: strix_halo_server
+    ↓
+provider type: openai_compatible
+    ↓
+base URL and secret reference
+```
+
+This permits a future config such as:
+
+```text
+understanding → small local model
+worker → larger local model
+critic → hosted advanced model
+revision → worker model
+```
+
+without pipeline changes.
+
+## 8. Prompt construction boundaries
+
+Every model prompt has:
+
+1. application-controlled system instructions;
+2. structured orchestration metadata;
+3. explicit delimiters around user-controlled content;
+4. explicit output contract;
+5. no hidden chain-of-thought request.
+
+User content may request that the model ignore instructions. The application prompt must state that delimited user content is data and cannot override orchestration instructions.
+
+## 9. Structured-output handling
+
+The understanding and critic stages use this sequence:
+
+```text
+raw response
+→ strip optional Markdown fence
+→ locate one top-level JSON object
+→ JSON parse
+→ Pydantic validation
+→ deterministic policy validation
+```
+
+If extraction or validation fails, one repair call may receive:
+
+- the invalid response;
+- concise validation errors;
+- the required JSON schema summary.
+
+No additional repair loop is allowed.
+
+## 10. Error and degradation design
+
+See `ERROR_HANDLING.md`. Important architectural distinctions:
+
+- invalid configuration prevents startup;
+- inability to produce a valid execution plan normally prevents worker execution;
+- optional deterministic fallback is explicit and traceable;
+- critic failure may degrade to an unchecked worker draft;
+- revision failure retains the original worker draft;
+- transient HTTP retries are separate from semantic/structured-output repair retries.
+
+## 11. Extensibility boundaries
+
+Future additions should connect through these boundaries:
+
+- new provider: implement `ModelClient` and register provider type;
+- new strategy: add static strategy definition and template;
+- new role: extend role enum/config schema intentionally;
+- RAG: future context-enrichment stage before understanding or worker prompt construction;
+- tools: future controlled execution stage after a validated plan;
+- server mode: future interface around `PipelineRunner`.
+
+None of those future features belong in the MVP implementation.

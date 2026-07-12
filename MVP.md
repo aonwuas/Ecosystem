@@ -1,387 +1,275 @@
-# MVP: Prompt Orchestrator
+# Minimum Viable Product Specification
 
-## Product Goal
+## 1. Product goal
 
-Create a prompt orchestration ecosystem that improves LLM performance across a variety of tasks by adding a structured control layer before and after generation.
+Create a general-purpose orchestration runtime that improves LLM performance across writing, analysis, explanation, planning, comparison, summarization, transformation, technical assistance, creative work, and other text-based tasks.
 
-The product is not a model. It is a runtime that decides how a model should be used for a specific prompt.
+The runtime improves performance by separating task understanding from task execution and by evaluating the generated draft against an explicit plan.
 
-The MVP should prove this thesis:
+## 2. Core hypothesis
 
-> Better prompt intake, classification, strategy selection, prompt construction, and lightweight output review can improve model behavior even without RAG or tools.
+A worker model should receive a prompt that already identifies:
 
-## Target User
+- the user's actual goal;
+- the type and complexity of work;
+- important constraints;
+- missing information and assumptions;
+- the best supported response strategy;
+- the requested output contract;
+- concrete quality criteria.
 
-The initial user is a person interacting with an LLM through a CLI. The user provides a prompt and expects a useful answer.
+A separate critic pass should identify whether the draft followed that plan.
 
-The system should work across broad categories, not just software engineering.
+## 3. Primary users
 
-Examples:
+### Local-model user
 
-- “Help me write a professional email.”
-- “Summarize this text.”
-- “Compare these options.”
-- “Explain this concept.”
-- “Help me plan a project.”
-- “Brainstorm names for this product.”
-- “Make this paragraph friendlier.”
-- “Should I make this financial decision?”
+A user runs one or more local OpenAI-compatible model servers and maps model roles to those endpoints through YAML configuration.
 
-## Core MVP Capabilities
+### Hybrid local/API user
 
-The MVP should:
+A future user may map some roles to local models and others to hosted providers. The MVP architecture must permit this without requiring pipeline changes, even though only generic OpenAI-compatible HTTP is implemented initially.
 
-1. Accept a prompt.
-2. Normalize the prompt into a structured request.
-3. Extract explicit constraints and requested output format.
-4. Determine the user’s intent.
-5. Determine the prompt/task type.
-6. Determine task complexity.
-7. Detect ambiguity and missing information.
-8. Detect risk or sensitivity level.
-9. Decide whether to ask a follow-up question, proceed with assumptions, refuse/redirect, or answer directly.
-10. Select a response strategy.
-11. Select a model role or prompt template.
-12. Build an optimized internal prompt.
-13. Generate a draft answer through a model client abstraction.
-14. Run a lightweight quality check.
-15. Return the final answer, including assumptions or limitations when useful.
+### Developer and evaluator
 
-## Non-Goals
+A developer uses mock or scripted model clients to test strategies, prompts, parsing, and pipeline behavior without a live model server.
 
-The MVP must not include:
+## 4. Primary user experience
 
-- RAG
-- embeddings
-- vector database
-- retrieval over documents
-- retrieval over code repositories
-- external tools
-- shell execution
-- function calling / tool calling
-- web browsing
-- database persistence
-- long-term memory
-- multi-user support
-- server deployment
-- web UI
-- user accounts
-- authentication
-- background jobs
-- agent workspaces
+The user submits a prompt:
 
-## Product Boundary
+```bash
+prompt-orchestrator run "Create a practical study plan for learning linear algebra"
+```
 
-The MVP is a single-user, local, CLI-first orchestration layer.
+The runtime:
 
-It should be possible to run and test the full pipeline without a real model endpoint by using a mock model client.
+1. normalizes the request;
+2. calls the understanding role;
+3. validates the returned execution plan;
+4. returns a clarification question if required;
+5. otherwise builds a worker prompt from a registered strategy;
+6. calls the worker role;
+7. calls the critic role;
+8. optionally calls the revision role once;
+9. prints the final answer.
 
-A real model client may be supported as a configuration option, but it is not required for tests.
+The orchestration is hidden by default. The user can inspect it with `understand`, `plan`, `--trace`, or `--json`.
 
-## Prompt Categories
+## 5. Functional requirements
 
-The MVP should recognize these broad task types:
+### FR-1: Prompt intake
 
-- `qa`
-- `explanation`
-- `writing`
-- `rewrite`
-- `summarization`
-- `translation`
-- `brainstorming`
-- `planning`
-- `analysis`
-- `comparison`
-- `decision_support`
-- `classification`
-- `extraction`
-- `structured_output`
-- `creative_generation`
-- `technical_help`
-- `debugging`
-- `conversation`
-- `unknown`
+The system must accept:
 
-The implementation may represent these as enums or string constants.
+- prompt text as a CLI argument;
+- prompt text from standard input;
+- optional conversation/context text supplied by the caller;
+- optional explicit output-format override;
+- optional configuration path.
 
-## Intent Categories
+It must reject an empty request with a clear message.
 
-Intent describes what the user is trying to accomplish.
+### FR-2: Model-driven understanding
 
-Useful intent values include:
+The system must call the configured `understanding` role with a fixed prompt contract.
 
-- `get_answer`
-- `understand_topic`
-- `create_text`
-- `improve_text`
-- `condense_information`
-- `convert_language`
-- `generate_ideas`
-- `make_plan`
-- `evaluate_options`
-- `make_decision`
-- `analyze_content`
-- `extract_information`
-- `produce_structured_output`
-- `solve_problem`
-- `chat`
-- `unknown`
+The understanding output must contain a structured `ExecutionPlan` describing:
 
-## Complexity Levels
+- user goal;
+- intent;
+- task type;
+- complexity;
+- ambiguity;
+- risk level and categories;
+- missing information;
+- assumptions;
+- clarification decision;
+- selected registered strategy;
+- selected configured worker role;
+- output contract;
+- must-include and must-avoid constraints;
+- quality criteria;
+- uncertainties and concise rationale.
 
-The MVP should estimate complexity as:
+### FR-3: Deterministic validation and policy
 
-- `simple`
-- `moderate`
-- `complex`
-- `multi_step`
-- `high_stakes`
+The system must validate:
 
-Guidance:
+- JSON syntax and required fields;
+- enum values;
+- strategy registration;
+- role registration;
+- maximum lengths and list sizes;
+- clarification consistency;
+- output-format support;
+- revision and retry limits;
+- policy constraints for sensitive tasks.
 
-`simple`:
-- direct Q&A
-- small rewrite
-- short explanation
+The execution plan is not used until validation succeeds.
 
-`moderate`:
-- comparison
-- plan with a few steps
-- moderate analysis
+### FR-4: Clarification gate
 
-`complex`:
-- multiple constraints
-- broad planning
-- several possible interpretations
-- long-form output
+The system must support these outcomes:
 
-`multi_step`:
-- requires decomposition
-- requires a staged answer
-- combines several sub-tasks
+- `proceed`;
+- `ask_clarification`;
+- `refuse_or_redirect`.
 
-`high_stakes`:
-- legal, medical, financial, safety, privacy, or irreversible decisions
+When clarification is required, the CLI prints one focused question and stops. The MVP does not keep a persistent session.
 
-## Ambiguity Detection
+### FR-5: Registered response strategies
 
-The MVP should detect prompts that are missing required information.
-
-Common ambiguity signals:
-
-- “this” without provided content
-- “it” without a clear referent
-- “the above” without context
-- “make it better” with no target text
-- “write a reply” without the message to reply to
-- requested format is unclear when format is critical
-- audience or tone is missing for a high-context writing request
-
-Ambiguity levels:
-
-- `none`
-- `low`
-- `medium`
-- `high`
-
-The system should ask a follow-up only when needed. It should not over-ask.
-
-## Risk and Sensitivity Detection
-
-Risk/sensitivity categories:
-
-- `none`
-- `medical`
-- `legal`
-- `financial`
-- `security`
-- `privacy`
-- `personal_crisis`
-- `dangerous_instructions`
-- `academic_integrity`
-- `employment_sensitive`
-- `reputation_sensitive`
-
-High-stakes prompts should be answered cautiously and should not present the model as an authority.
-
-Dangerous or disallowed prompts should be routed to a safety redirect strategy.
-
-## Clarification Decisions
-
-The clarification gate should return one of:
-
-- `answer_now`
-- `ask_followup`
-- `proceed_with_assumptions`
-- `refuse_or_redirect`
-
-Ask a follow-up when the task cannot be completed usefully without missing information.
-
-Proceed with assumptions when assumptions are safe and the answer can still be useful.
-
-Refuse/redirect only for unsafe or disallowed requests.
-
-## Response Strategies
-
-The MVP should support at least these strategies:
+The MVP must support at least:
 
 - `direct_answer`
+- `concise_explanation`
 - `step_by_step_explanation`
 - `structured_analysis`
-- `pros_cons_comparison`
+- `planning`
+- `comparison`
 - `decision_support`
+- `brainstorming`
 - `draft_generation`
-- `rewrite_with_preserved_meaning`
+- `rewrite_preserve_meaning`
 - `summarization`
-- `brainstorm_options`
-- `plan_generation`
-- `classification_response`
-- `extraction_response`
-- `structured_output_response`
-- `clarify_first`
+- `information_extraction`
+- `structured_output`
+- `creative_generation`
+- `empathetic_guidance`
+- `technical_assistance`
 - `safety_redirect`
 
-Each response strategy should map to a prompt template.
+The understanding model chooses only from this registry. Strategy metadata determines the worker prompt template and default output behavior.
 
-## Model Roles
+### FR-6: Prompt construction
 
-Even if the MVP uses one mock model, the architecture should include logical model roles:
+The worker prompt must include:
 
-- `generalist`
-- `writer`
-- `rewriter`
-- `summarizer`
-- `planner`
-- `analyst`
-- `critic`
-- `safety`
+- a stable system instruction for the selected strategy;
+- the original user request in explicit delimiters;
+- supplied context in separate delimiters;
+- execution-plan summary;
+- assumptions;
+- must-include constraints;
+- must-avoid constraints;
+- output contract;
+- quality criteria.
 
-For the MVP, these roles may all route to the same mock client. The purpose is to make the architecture expandable later.
+It must not include hidden chain-of-thought requests.
 
-## Internal Prompt Construction
+### FR-7: Model provider configuration
 
-The prompt builder should produce a structured internal prompt containing:
+The runtime must load YAML defining:
 
-- original user prompt
-- normalized task description
-- intent
-- task type
-- complexity
-- risk/sensitivity classification
-- explicit constraints
-- requested output format
-- assumptions
-- selected response strategy
-- instructions specific to the strategy
-- output requirements
+- providers;
+- named models;
+- role bindings;
+- runtime limits;
+- critic policy;
+- trace policy.
 
-The internal prompt should be testable as a string or structured object.
+Configuration must support local endpoints with no API key and API-key lookup through environment variables.
 
-## Quality Check
+### FR-8: Worker generation
 
-The MVP should include a lightweight quality check that verifies:
+The system must call the configured worker role using the built prompt and return a draft result with request metadata and usage metadata when available.
 
-- the answer addresses the user prompt
-- the selected strategy was followed
-- requested format was followed when explicit
-- important constraints were respected
-- high-stakes prompts include appropriate caution
-- clarification was not required but ignored
+### FR-9: Critic review
 
-The quality check should not loop indefinitely.
+The critic must evaluate the draft against the plan and return structured findings:
 
-At most one revision pass is allowed in the MVP.
+- pass/fail;
+- issue list;
+- violated criteria;
+- whether revision is recommended;
+- concise revision instruction.
 
-## CLI Commands
+### FR-10: One-pass revision
 
-Expected final CLI commands:
+When enabled and recommended:
 
-```bash
-prompt-orchestrator classify "..."
-prompt-orchestrator plan "..."
-prompt-orchestrator run "..."
-prompt-orchestrator run --json "..."
-```
+- call the configured revision role once;
+- provide the original request, validated plan, draft, and concise revision instruction;
+- return the revised answer if successful;
+- never enter a second critic/revision loop.
 
-Optional useful commands:
+### FR-11: Final response
 
-```bash
-prompt-orchestrator templates
-prompt-orchestrator examples
-```
+The final result must indicate:
 
-Do not add commands that require tools, files, RAG, or servers.
+- final answer text or clarification question;
+- status;
+- strategy used;
+- roles/models selected;
+- assumptions disclosed to the user when material;
+- critic status;
+- whether revision occurred;
+- warnings and degraded-mode notices.
 
-## Example Behavior
+Default CLI display prints a clean user-facing answer. JSON mode exposes the structured result.
 
-### Ambiguous writing request
+### FR-12: Traceability
 
-Prompt:
+Trace mode must capture sanitized summaries for:
 
-```text
-Make this better.
-```
+- intake;
+- understanding request and response status;
+- parsed execution plan;
+- policy changes or fallback behavior;
+- worker role and strategy;
+- critic result;
+- revision result;
+- timing and retry counts.
 
-Expected behavior:
+No trace persistence is required.
 
-- task type: rewrite
-- ambiguity: high
-- clarification decision: ask_followup
-- final response: asks user to provide the text to improve
+### FR-13: Testability
 
-### Planning request
+The complete pipeline must run with scripted model responses and no network access.
 
-Prompt:
+## 6. Non-functional requirements
 
-```text
-Help me plan a small local-first note taking app.
-```
+- Predictable: all loops and retries are bounded.
+- Configurable: no provider URL or model name is hardcoded.
+- Inspectable: users can view plans and traces.
+- Testable: default tests need no live server.
+- Extensible: new providers, strategies, and model roles can be added behind registries/interfaces.
+- Safe by construction: user prompts are delimited data, secrets are not logged, and model outputs are validated.
+- Portable: supported on Windows and Linux with repository-controlled LF line endings.
 
-Expected behavior:
+## 7. Non-goals
 
-- task type: planning
-- complexity: moderate
-- strategy: plan_generation
-- final response: structured plan
+The MVP does not implement:
 
-### Comparison request
+- RAG;
+- tools or function calling;
+- file access by the runtime;
+- code execution;
+- browsing;
+- persistent chat sessions;
+- persistent traces;
+- database storage;
+- automatic provider/model benchmarking;
+- automatic cost-based escalation;
+- streaming output;
+- parallel model calls;
+- multi-user service mode;
+- GUI or web UI.
 
-Prompt:
-
-```text
-Compare SQLite and Postgres for a small internal tool.
-```
-
-Expected behavior:
-
-- task type: comparison
-- strategy: pros_cons_comparison
-- final response: structured comparison with recommendation framing
-
-### High-stakes financial request
-
-Prompt:
-
-```text
-Should I invest all my savings in this company?
-```
-
-Expected behavior:
-
-- risk: financial
-- complexity: high_stakes
-- strategy: decision_support
-- final response: cautious, non-prescriptive guidance
-
-## Definition of MVP Complete
+## 8. MVP completion criteria
 
 The MVP is complete when:
 
-- all checkpoint acceptance criteria pass
-- CLI commands work
-- the full pipeline works with mock model responses
-- classifications are structured and serializable
-- prompt templates render correctly
-- quality check can pass/fail and request one revision
-- README contains usage examples
-- no out-of-scope features have been added
+1. configuration validation works for mock and OpenAI-compatible providers;
+2. all documented CLI commands work;
+3. the full pipeline works with scripted models;
+4. a live OpenAI-compatible endpoint can be used through configuration;
+5. understanding and critic structured outputs are robustly parsed and validated;
+6. clarification stops execution correctly;
+7. at most one revision can occur;
+8. all retries are bounded;
+9. traces are sanitized;
+10. README examples match implemented behavior;
+11. linting, formatting checks, type checking, and tests pass;
+12. prohibited MVP scope has not been added.
