@@ -18,3 +18,21 @@ class ConfigurationError(PromptOrchestratorError):
     """Configuration loading, validation, or resolution failed."""
 
     code = "CONFIGURATION_ERROR"
+
+
+class ProviderError(PromptOrchestratorError):
+    """A model provider request failed."""
+
+    code = "PROVIDER_ERROR"
+
+
+class ProviderTimeoutError(ProviderError):
+    """A model provider request timed out."""
+
+    code = "PROVIDER_TIMEOUT"
+
+
+class ProviderAuthenticationError(ProviderError):
+    """A model provider rejected authentication."""
+
+    code = "PROVIDER_AUTHENTICATION"

@@ -106,7 +106,8 @@ class OpenAICompatibleProviderConfig(ConfigModel):
                 f"api_key_env '{self.api_key_env}' is set but the environment "
                 "variable is missing"
             )
-        return self.model_copy(update={"api_key": SecretValue(secret_value)})
+        object.__setattr__(self, "api_key", SecretValue(secret_value))
+        return self
 
     @field_serializer("api_key")
     def serialize_api_key(self, value: SecretValue | None) -> None:
