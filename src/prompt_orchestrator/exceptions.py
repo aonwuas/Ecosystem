@@ -68,6 +68,18 @@ class WorkerError(PromptOrchestratorError):
     code = "WORKER_ERROR"
 
 
+class CriticError(PromptOrchestratorError):
+    """Critic review failed."""
+
+    code = "CRITIC_ERROR"
+
+
+class RevisionError(PromptOrchestratorError):
+    """Revision generation failed."""
+
+    code = "REVISION_ERROR"
+
+
 class PromptRenderError(PromptOrchestratorError):
     """A package-controlled prompt template could not be rendered."""
 
