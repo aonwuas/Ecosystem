@@ -42,3 +42,9 @@ class StructuredOutputError(PromptOrchestratorError):
     """Structured model output could not be extracted or validated."""
 
     code = "STRUCTURED_OUTPUT_ERROR"
+
+
+class PromptRenderError(PromptOrchestratorError):
+    """A package-controlled prompt template could not be rendered."""
+
+    code = "PROMPT_RENDER_ERROR"
