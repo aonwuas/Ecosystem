@@ -20,6 +20,12 @@ class ConfigurationError(PromptOrchestratorError):
     code = "CONFIGURATION_ERROR"
 
 
+class InputError(PromptOrchestratorError):
+    """Caller input is invalid."""
+
+    code = "INPUT_ERROR"
+
+
 class ProviderError(PromptOrchestratorError):
     """A model provider request failed."""
 
