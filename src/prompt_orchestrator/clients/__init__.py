@@ -1,6 +1,7 @@
 """Model client abstractions and provider adapters."""
 
 from prompt_orchestrator.clients.base import ModelClient
+from prompt_orchestrator.clients.diagnostic import DiagnosticModelClient
 from prompt_orchestrator.clients.factory import (
     ClientFactory,
     RoutedModelClient,
@@ -12,6 +13,7 @@ from prompt_orchestrator.clients.openai_compatible import OpenAICompatibleModelC
 
 __all__ = [
     "ClientFactory",
+    "DiagnosticModelClient",
     "MockModelClient",
     "ModelClient",
     "OpenAICompatibleModelClient",

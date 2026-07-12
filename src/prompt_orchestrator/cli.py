@@ -6,9 +6,14 @@ import argparse
 import sys
 import traceback
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from prompt_orchestrator import __version__
-from prompt_orchestrator.clients import create_pipeline_client
+from prompt_orchestrator.clients import (
+    DiagnosticModelClient,
+    ModelClient,
+    create_pipeline_client,
+)
 from prompt_orchestrator.config import load_config, summarize_config
 from prompt_orchestrator.config.models import PromptOrchestratorConfig
 from prompt_orchestrator.domain import PromptRequest
@@ -28,6 +33,11 @@ from prompt_orchestrator.rendering import (
     render_understand_text,
 )
 from prompt_orchestrator.stages import run_understanding_stage
+from prompt_orchestrator.stages.trace import (
+    LlmIoTraceRecorder,
+    reset_current_llm_io_recorder,
+    set_current_llm_io_recorder,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -109,6 +119,15 @@ def _add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Render structured JSON.")
     parser.add_argument("--trace", action="store_true", help="Include trace metadata.")
     parser.add_argument(
+        "--show-llm-io",
+        action="store_true",
+        help="Print explicit model request/response diagnostics to stderr.",
+    )
+    parser.add_argument(
+        "--save-llm-io",
+        help="Write explicit model request/response diagnostics as JSONL.",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Show stack traces for unexpected internal errors.",
@@ -141,53 +160,76 @@ def _handle_config_validate(args: argparse.Namespace) -> int:
 
 def _handle_understand(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    recorder = _llm_io_recorder(args)
+    token = set_current_llm_io_recorder(recorder)
     include_trace = _include_trace(args, config)
-    client = create_pipeline_client(config)
-    request = _prompt_request_from_args(args)
-    result = run_understanding_stage(request, config=config, client=client)
-    if args.json:
-        payload = result.validated_plan.model_dump(mode="json")
-        if include_trace:
-            payload["trace"] = result.trace.model_dump(mode="json")
-        print(render_json(payload))
-    else:
-        print(render_understand_text(result.validated_plan))
-        if include_trace:
-            print(_render_trace_text(result.trace))
-    return 0
+    client = _pipeline_client(config, recorder)
+    try:
+        request = _prompt_request_from_args(args)
+        result = run_understanding_stage(request, config=config, client=client)
+        if args.json:
+            payload = result.validated_plan.model_dump(mode="json")
+            if include_trace:
+                payload["trace"] = result.trace.model_dump(mode="json")
+            print(render_json(payload))
+        else:
+            print(render_understand_text(result.validated_plan))
+            if include_trace:
+                print(_render_trace_text(result.trace))
+        return 0
+    finally:
+        reset_current_llm_io_recorder(token)
+        _emit_llm_io(args, recorder)
 
 
 def _handle_plan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    recorder = _llm_io_recorder(args)
+    token = set_current_llm_io_recorder(recorder)
     include_trace = _include_trace(args, config)
-    client = create_pipeline_client(config)
-    runner = PipelineRunner(config=config, client=client)
-    result = runner.plan(_prompt_request_from_args(args), include_trace=include_trace)
-    if args.json:
-        print(render_json(_plan_payload(result)))
-    else:
-        print(render_plan_text(result))
-        if include_trace and result.trace is not None:
-            print(_render_trace_text(result.trace))
-    if result.final_response is None:
-        return 0
-    return _status_exit_code(result.final_response.status.value)
+    client = _pipeline_client(config, recorder)
+    try:
+        runner = PipelineRunner(config=config, client=client)
+        result = runner.plan(
+            _prompt_request_from_args(args),
+            include_trace=include_trace,
+        )
+        if args.json:
+            print(render_json(_plan_payload(result)))
+        else:
+            print(render_plan_text(result))
+            if include_trace and result.trace is not None:
+                print(_render_trace_text(result.trace))
+        if result.final_response is None:
+            return 0
+        return _status_exit_code(result.final_response.status.value)
+    finally:
+        reset_current_llm_io_recorder(token)
+        _emit_llm_io(args, recorder)
 
 
 def _handle_run(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    recorder = _llm_io_recorder(args)
+    token = set_current_llm_io_recorder(recorder)
     include_trace = _include_trace(args, config)
-    client = create_pipeline_client(config)
-    runner = PipelineRunner(config=config, client=client)
-    result = runner.run(_prompt_request_from_args(args), include_trace=include_trace)
-    response = result.final_response
-    if args.json:
-        print(render_json(response))
-    else:
-        print(render_final_text(response))
-        if include_trace and response.trace is not None:
-            print(_render_trace_text(response.trace))
-    return _status_exit_code(response.status.value)
+    client = _pipeline_client(config, recorder)
+    try:
+        runner = PipelineRunner(config=config, client=client)
+        result = runner.run(
+            _prompt_request_from_args(args), include_trace=include_trace
+        )
+        response = result.final_response
+        if args.json:
+            print(render_json(response))
+        else:
+            print(render_final_text(response))
+            if include_trace and response.trace is not None:
+                print(_render_trace_text(response.trace))
+        return _status_exit_code(response.status.value)
+    finally:
+        reset_current_llm_io_recorder(token)
+        _emit_llm_io(args, recorder)
 
 
 def _prompt_request_from_args(args: argparse.Namespace) -> PromptRequest:
@@ -213,6 +255,37 @@ def _include_trace(
     config: PromptOrchestratorConfig,
 ) -> bool:
     return bool(args.trace or config.runtime.trace.enabled_by_default)
+
+
+def _llm_io_recorder(args: argparse.Namespace) -> LlmIoTraceRecorder | None:
+    if args.show_llm_io or args.save_llm_io:
+        return LlmIoTraceRecorder()
+    return None
+
+
+def _pipeline_client(
+    config: PromptOrchestratorConfig,
+    recorder: LlmIoTraceRecorder | None,
+) -> ModelClient:
+    client = create_pipeline_client(config)
+    if recorder is None:
+        return client
+    return DiagnosticModelClient(client, config=config, recorder=recorder)
+
+
+def _emit_llm_io(
+    args: argparse.Namespace,
+    recorder: LlmIoTraceRecorder | None,
+) -> None:
+    if recorder is None:
+        return
+    if args.show_llm_io and recorder.records:
+        print(recorder.render_text(), file=sys.stderr)
+    if args.save_llm_io:
+        Path(args.save_llm_io).write_text(
+            recorder.render_jsonl() + ("\n" if recorder.records else ""),
+            encoding="utf-8",
+        )
 
 
 def _plan_payload(result: PipelinePlanResult) -> dict[str, object]:

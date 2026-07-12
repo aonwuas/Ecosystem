@@ -72,7 +72,9 @@ def write_cli_config(
     script: list[dict[str, object]],
     *,
     trace_enabled_by_default: bool = False,
+    repair_attempts: int = 1,
 ) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     script_path = tmp_path / "script.yaml"
     script_path.write_text(json.dumps(script), encoding="utf-8")
     config_path = tmp_path / "config.yaml"
@@ -103,9 +105,10 @@ def write_cli_config(
                     "revision": "scripted_revision",
                 },
                 "runtime": {
+                    "structured_output_repair_attempts": repair_attempts,
                     "trace": {
                         "enabled_by_default": trace_enabled_by_default,
-                    }
+                    },
                 },
             }
         ),
@@ -144,6 +147,26 @@ def full_run_script() -> list[dict[str, object]]:
     ]
 
 
+def invalid_schema_understanding_script() -> list[dict[str, object]]:
+    return [
+        {
+            "expect": "understanding",
+            "respond_json": {
+                "schema_version": 1,
+                "understanding": {"summary": "unique_schema_raw_value"},
+                "clarification": {"needs_clarification": False},
+                "strategy": "draft_generation",
+                "worker_role": "worker",
+                "output_contract": {"format": "email"},
+                "must_include": [],
+                "must_avoid": [],
+                "quality_criteria": [],
+                "critic_required": True,
+            },
+        }
+    ]
+
+
 def test_run_default_prints_only_user_facing_result(tmp_path: Path) -> None:
     config_path = write_cli_config(tmp_path, full_run_script())
 
@@ -157,6 +180,63 @@ def test_run_default_prints_only_user_facing_result(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert result.stdout == "Draft answer.\n"
     assert result.stderr == ""
+
+
+def test_understand_show_llm_io_prints_request_and_raw_response(
+    tmp_path: Path,
+) -> None:
+    config_path = write_cli_config(
+        tmp_path,
+        [{"expect": "understanding", "respond_json": plan_payload()}],
+    )
+
+    result = cli(
+        "understand",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(config_path),
+        "--show-llm-io",
+    )
+
+    assert result.returncode == 0
+    assert "Status: understood" in result.stdout
+    assert "===== LLM CALL: understanding =====" in result.stderr
+    assert "Role: understanding" in result.stderr
+    assert "Model: scripted_general" in result.stderr
+    assert "Provider: scripted (mock)" in result.stderr
+    assert "----- REQUEST MESSAGES -----" in result.stderr
+    assert "[system]" in result.stderr
+    assert "[user]" in result.stderr
+    assert "----- RAW RESPONSE -----" in result.stderr
+    assert "----- EXTRACTED JSON -----" in result.stderr
+
+
+def test_understand_show_llm_io_prints_repair_call(tmp_path: Path) -> None:
+    config_path = write_cli_config(
+        tmp_path,
+        [
+            {
+                "expect": "understanding",
+                "respond_text": "not-json first_bad_response",
+            },
+            {"expect": "understanding", "respond_json": plan_payload()},
+        ],
+    )
+
+    result = cli(
+        "understand",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(config_path),
+        "--show-llm-io",
+    )
+
+    assert result.returncode == 0
+    assert "===== LLM CALL: understanding =====" in result.stderr
+    assert "===== LLM CALL: understanding repair =====" in result.stderr
+    assert "first_bad_response" in result.stderr
+    assert "<INVALID_RESPONSE>" in result.stderr
+    assert "----- VALIDATION ERROR -----" in result.stderr
 
 
 def test_run_json_renders_final_response(tmp_path: Path) -> None:
@@ -180,6 +260,25 @@ def test_run_json_renders_final_response(tmp_path: Path) -> None:
         "critic": "scripted_general",
         "revision": "scripted_revision",
     }
+
+
+def test_run_show_llm_io_includes_multiple_stage_records(tmp_path: Path) -> None:
+    config_path = write_cli_config(tmp_path, full_run_script())
+
+    result = cli(
+        "run",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(config_path),
+        "--show-llm-io",
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "Draft answer.\n"
+    assert result.stderr.count("===== LLM CALL:") == 3
+    assert "===== LLM CALL: understanding =====" in result.stderr
+    assert "===== LLM CALL: worker =====" in result.stderr
+    assert "===== LLM CALL: critic =====" in result.stderr
 
 
 def test_run_with_trace_keeps_user_prompt_out_of_trace(tmp_path: Path) -> None:
@@ -216,6 +315,57 @@ def test_runtime_trace_default_includes_trace_without_cli_flag(tmp_path: Path) -
     assert payload["trace"]["events"]
 
 
+def test_save_llm_io_writes_jsonl_file(tmp_path: Path) -> None:
+    config_path = write_cli_config(tmp_path, full_run_script())
+    output_path = tmp_path / "llm-io.jsonl"
+
+    result = cli(
+        "run",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(config_path),
+        "--save-llm-io",
+        str(output_path),
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "Draft answer.\n"
+    assert result.stderr == ""
+    records = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [record["stage"] for record in records] == [
+        "understanding",
+        "worker",
+        "critic",
+    ]
+    assert records[0]["request_messages"][0]["role"] == "system"
+    assert records[0]["raw_response_text"]
+
+
+def test_show_llm_io_does_not_change_pipeline_behavior(tmp_path: Path) -> None:
+    normal_config = write_cli_config(tmp_path / "normal", full_run_script())
+    debug_config = write_cli_config(tmp_path / "debug", full_run_script())
+
+    normal = cli(
+        "run",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(normal_config),
+    )
+    debug = cli(
+        "run",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(debug_config),
+        "--show-llm-io",
+    )
+
+    assert normal.returncode == debug.returncode == 0
+    assert normal.stdout == debug.stdout == "Draft answer.\n"
+
+
 def test_understand_json_renders_validated_plan(tmp_path: Path) -> None:
     config_path = write_cli_config(
         tmp_path,
@@ -234,6 +384,41 @@ def test_understand_json_renders_validated_plan(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload["plan"]["strategy"] == "comparison"
     assert payload["plan"]["worker_role"] == "worker"
+
+
+def test_schema_failure_debug_includes_raw_response_but_normal_does_not(
+    tmp_path: Path,
+) -> None:
+    normal_config = write_cli_config(
+        tmp_path / "normal",
+        invalid_schema_understanding_script(),
+        repair_attempts=0,
+    )
+    debug_config = write_cli_config(
+        tmp_path / "debug",
+        invalid_schema_understanding_script(),
+        repair_attempts=0,
+    )
+
+    normal = cli(
+        "understand",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(normal_config),
+    )
+    debug = cli(
+        "understand",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(debug_config),
+        "--show-llm-io",
+    )
+
+    assert normal.returncode == 5
+    assert debug.returncode == 5
+    assert "unique_schema_raw_value" not in normal.stderr
+    assert "unique_schema_raw_value" in debug.stderr
+    assert "----- VALIDATION ERROR -----" in debug.stderr
 
 
 def test_plan_does_not_call_worker(tmp_path: Path) -> None:
