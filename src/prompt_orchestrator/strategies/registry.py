@@ -54,6 +54,7 @@ _REGISTRY = {
         StrategyId.STRUCTURED_ANALYSIS,
         "Separate facts, assumptions, considerations, and conclusions.",
         ("Separate assumptions from conclusions.", "Make tradeoffs explicit."),
+        modes=MARKDOWN_TEXT_JSON,
     ),
     StrategyId.PLANNING: _definition(
         StrategyId.PLANNING,

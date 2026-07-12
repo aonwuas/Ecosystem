@@ -36,6 +36,7 @@ from prompt_orchestrator.parsing import (
     build_repair_request_data,
     validate_structured_output,
 )
+from prompt_orchestrator.policy import evaluate_execution_plan_policy
 from prompt_orchestrator.prompts import (
     UNDERSTANDING_VARIABLES,
     load_template,
@@ -83,19 +84,32 @@ def run_understanding_stage(
             attempt=1,
             repair_error=None,
         )
-        validated = ValidatedExecutionPlan(plan=plan)
+        policy = evaluate_execution_plan_policy(
+            plan,
+            request=intake.request,
+            config=config,
+        )
         trace.add_event(
             stage="understanding",
             event="validated",
             status="ok",
             details={
-                "strategy": plan.strategy.value,
-                "worker_role": plan.worker_role.value,
+                "strategy": policy.validated_plan.plan.strategy.value,
+                "worker_role": policy.validated_plan.plan.worker_role.value,
+            },
+        )
+        trace.add_event(
+            stage="policy",
+            event="evaluated",
+            status="ok",
+            details={
+                "outcome": policy.outcome.value,
+                "policy_changes": len(policy.validated_plan.policy_changes),
             },
         )
         return UnderstandingStageResult(
             intake=intake,
-            validated_plan=validated,
+            validated_plan=policy.validated_plan,
             trace=trace.to_trace(),
         )
     except StructuredOutputError as first_error:
@@ -121,20 +135,34 @@ def run_understanding_stage(
                     attempt=budget.attempts_used + 1,
                     repair_error=first_error,
                 )
-                validated = ValidatedExecutionPlan(plan=plan)
+                policy = evaluate_execution_plan_policy(
+                    plan,
+                    request=intake.request,
+                    config=config,
+                )
                 trace.add_event(
                     stage="understanding",
                     event="repair_validated",
                     status="ok",
                     attempt=budget.attempts_used + 1,
                     details={
-                        "strategy": plan.strategy.value,
-                        "worker_role": plan.worker_role.value,
+                        "strategy": policy.validated_plan.plan.strategy.value,
+                        "worker_role": policy.validated_plan.plan.worker_role.value,
+                    },
+                )
+                trace.add_event(
+                    stage="policy",
+                    event="repair_evaluated",
+                    status="ok",
+                    attempt=budget.attempts_used + 1,
+                    details={
+                        "outcome": policy.outcome.value,
+                        "policy_changes": len(policy.validated_plan.policy_changes),
                     },
                 )
                 return UnderstandingStageResult(
                     intake=intake,
-                    validated_plan=validated,
+                    validated_plan=policy.validated_plan,
                     trace=trace.to_trace(),
                 )
             except StructuredOutputError as repair_error:
@@ -298,13 +326,15 @@ def _handle_understanding_failure(
         warning_code="UNDERSTANDING_SAFE_FALLBACK",
         details={"strategy": fallback_plan.strategy.value},
     )
+    policy = evaluate_execution_plan_policy(
+        fallback_plan,
+        request=intake.request,
+        config=config,
+        used_safe_fallback=True,
+    )
     return UnderstandingStageResult(
         intake=intake,
-        validated_plan=ValidatedExecutionPlan(
-            plan=fallback_plan,
-            validation_warnings=["understanding model output could not be validated"],
-            used_safe_fallback=True,
-        ),
+        validated_plan=policy.validated_plan,
         trace=trace.to_trace(),
     )
 

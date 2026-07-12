@@ -50,6 +50,18 @@ class StructuredOutputError(PromptOrchestratorError):
     code = "STRUCTURED_OUTPUT_ERROR"
 
 
+class ExecutionPlanValidationError(PromptOrchestratorError):
+    """A model-produced execution plan failed deterministic validation."""
+
+    code = "EXECUTION_PLAN_VALIDATION_ERROR"
+
+
+class PolicyError(PromptOrchestratorError):
+    """A model-produced plan violates deterministic execution policy."""
+
+    code = "POLICY_ERROR"
+
+
 class PromptRenderError(PromptOrchestratorError):
     """A package-controlled prompt template could not be rendered."""
 
