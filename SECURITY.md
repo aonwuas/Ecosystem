@@ -38,6 +38,9 @@ The MVP cannot guarantee that a model will never follow an injected instruction,
 - Store only environment-variable names in config.
 - Resolve secrets at runtime.
 - Use secret types that redact repr/serialization.
+- Put private HTTP header values in `secret_headers`, not `default_headers`.
+- Reject obviously sensitive literal `default_headers`.
+- Redact both sensitive key names and known secret values resolved from config.
 - Never include secrets in exceptions, logs, traces, request dumps, snapshots, or test fixtures.
 - Never commit real credentials.
 - `.env` and local config files are ignored by Git.
@@ -55,10 +58,13 @@ The MVP cannot guarantee that a model will never follow an injected instruction,
 
 - Default output contains no internal prompts.
 - Trace contains summaries, stage statuses, model aliases, timings, and sanitized plan data.
-- Full prompt debugging is explicit opt-in.
-- API keys and authorization headers are always redacted.
+- Full prompt/model I/O debugging is explicit opt-in with `--show-llm-io` or
+  `--save-llm-io`.
+- API keys, authorization headers, secret headers, and known secret values are
+  redacted where practical even in explicit diagnostic output.
 - Provider raw responses should not be dumped by default.
-- Caller may choose to redact user content in trace.
+- User prompt content may appear in explicit diagnostic output because that mode
+  is requested for debugging.
 
 ## 6. Structured-output validation
 

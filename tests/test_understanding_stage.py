@@ -8,14 +8,15 @@ from prompt_orchestrator.clients import ScriptedModelClient
 from prompt_orchestrator.config.models import PromptOrchestratorConfig
 from prompt_orchestrator.domain import PromptRequest
 from prompt_orchestrator.domain.enums import StrategyId
-from prompt_orchestrator.exceptions import InputError, StructuredOutputError
+from prompt_orchestrator.exceptions import InputError
 from prompt_orchestrator.stages import normalize_input, run_understanding_stage
 
 
 def config_data(
     *,
-    failure_mode: str = "error",
+    failure_mode: str = "clarify",
     repair_attempts: int = 1,
+    default_output_mode: str = "text",
 ) -> dict[str, object]:
     return {
         "version": 1,
@@ -43,17 +44,23 @@ def config_data(
         "runtime": {
             "structured_output_repair_attempts": repair_attempts,
             "understanding_failure_mode": failure_mode,
+            "default_output_mode": default_output_mode,
         },
     }
 
 
 def config(
     *,
-    failure_mode: str = "error",
+    failure_mode: str = "clarify",
     repair_attempts: int = 1,
+    default_output_mode: str = "text",
 ) -> PromptOrchestratorConfig:
     return PromptOrchestratorConfig.model_validate(
-        config_data(failure_mode=failure_mode, repair_attempts=repair_attempts)
+        config_data(
+            failure_mode=failure_mode,
+            repair_attempts=repair_attempts,
+            default_output_mode=default_output_mode,
+        )
     )
 
 
@@ -80,7 +87,6 @@ def valid_plan_json(strategy: str = "comparison") -> str:
                 "reason": "A conditional comparison can be useful.",
             },
             "strategy": strategy,
-            "worker_role": "worker",
             "output_contract": {
                 "mode": "markdown",
                 "structure": "comparison with recommendation",
@@ -105,7 +111,6 @@ def observed_bad_initial_output() -> str:
             ),
             "clarification": None,
             "strategy": "draft_generation",
-            "worker_role": "worker",
             "output_contract": "Markdown-formatted email draft.",
             "quality_criteria": "Tone must be respectful.",
             "rationale": "The user wants a polished written draft.",
@@ -122,7 +127,6 @@ def observed_bad_repair_output() -> str:
             "understanding": "User wants a professional apology email.",
             "clarification": {},
             "strategy": "draft_generation",
-            "worker_role": "worker",
             "output_contract": {
                 "format": "Markdown",
                 "content": "Email draft",
@@ -179,6 +183,7 @@ def test_understanding_stage_returns_valid_execution_plan() -> None:
     assert "<USER_REQUEST>" in client.requests[0].messages[1].content
     assert '"understanding": {' in client.requests[0].messages[1].content
     assert '"output_contract": {' in client.requests[0].messages[1].content
+    assert '"worker_role"' not in client.requests[0].messages[1].content
     assert "understanding must be an object" in client.requests[0].messages[1].content
     assert (
         "do not answer the user's task"
@@ -217,12 +222,11 @@ def test_repair_prompt_addresses_observed_bad_shapes() -> None:
         ]
     )
 
-    with pytest.raises(StructuredOutputError) as exc_info:
-        run_understanding_stage(
-            PromptRequest(prompt="Help me write a professional apology email."),
-            config=config(failure_mode="error"),
-            client=client,
-        )
+    result = run_understanding_stage(
+        PromptRequest(prompt="Help me write a professional apology email."),
+        config=config(),
+        client=client,
+    )
 
     assert len(client.requests) == 2
     repair_prompt = client.requests[1].messages[1].content
@@ -239,11 +243,11 @@ def test_repair_prompt_addresses_observed_bad_shapes() -> None:
     assert "Top-level rationale, assumptions, and uncertainties are not allowed" in (
         repair_prompt
     )
-    assert "Structured output failed schema validation" in str(exc_info.value)
-    assert "clarification.action" in str(exc_info.value)
+    assert result.validated_plan.plan.clarification.action == "ask_clarification"
+    assert result.validated_plan.validation_warnings
 
 
-def test_invalid_repair_follows_error_failure_mode() -> None:
+def test_invalid_repair_requires_clarification_by_default() -> None:
     client = ScriptedModelClient(
         [
             {"expect": "understanding", "text": '{"schema_version": 1}'},
@@ -251,17 +255,21 @@ def test_invalid_repair_follows_error_failure_mode() -> None:
         ]
     )
 
-    with pytest.raises(StructuredOutputError):
-        run_understanding_stage(
-            PromptRequest(prompt="Please plan this"),
-            config=config(failure_mode="error"),
-            client=client,
-        )
+    result = run_understanding_stage(
+        PromptRequest(prompt="Please plan this"),
+        config=config(),
+        client=client,
+    )
 
     assert len(client.requests) == 2
+    assert result.validated_plan.plan.clarification.action == "ask_clarification"
+    assert "couldn't confidently interpret" in (
+        result.validated_plan.plan.clarification.question or ""
+    )
+    assert result.validated_plan.plan.understanding.risk_level == "high"
 
 
-def test_invalid_repair_can_use_safe_fallback() -> None:
+def test_understanding_failure_does_not_claim_prompt_was_understood() -> None:
     client = ScriptedModelClient(
         [
             {"expect": "understanding", "text": '{"schema_version": 1}'},
@@ -271,17 +279,17 @@ def test_invalid_repair_can_use_safe_fallback() -> None:
 
     result = run_understanding_stage(
         PromptRequest(prompt="Give me a useful answer"),
-        config=config(failure_mode="safe_fallback"),
+        config=config(),
         client=client,
     )
 
     assert result.validated_plan.used_safe_fallback is True
-    assert result.validated_plan.plan.strategy is StrategyId.DIRECT_ANSWER
-    assert result.validated_plan.validation_warnings
-    assert any(event.event == "safe_fallback" for event in result.trace.events)
+    assert result.validated_plan.plan.strategy is StrategyId.STRUCTURED_ANALYSIS
+    assert result.validated_plan.plan.clarification.action == "ask_clarification"
+    assert any(event.event == "clarification_required" for event in result.trace.events)
 
 
-def test_safe_fallback_uses_structured_analysis_for_json_override() -> None:
+def test_json_request_does_not_bypass_safe_understanding_failure() -> None:
     client = ScriptedModelClient(
         [
             {"expect": "understanding", "text": '{"bad": true}'},
@@ -291,22 +299,36 @@ def test_safe_fallback_uses_structured_analysis_for_json_override() -> None:
 
     result = run_understanding_stage(
         PromptRequest(prompt="Return JSON", requested_output_mode="json"),
-        config=config(failure_mode="safe_fallback"),
+        config=config(),
         client=client,
     )
 
-    assert result.validated_plan.plan.strategy is StrategyId.STRUCTURED_ANALYSIS
+    assert result.validated_plan.plan.clarification.action == "ask_clarification"
     assert result.validated_plan.plan.output_contract.mode == "json"
+
+
+def test_runtime_default_markdown_is_in_understanding_prompt() -> None:
+    client = ScriptedModelClient(
+        [{"expect": "understanding", "text": valid_plan_json()}]
+    )
+
+    run_understanding_stage(
+        PromptRequest(prompt="Compare options"),
+        config=config(default_output_mode="markdown"),
+        client=client,
+    )
+
+    assert "Requested output mode:\nmarkdown" in client.requests[0].messages[1].content
 
 
 def test_no_repair_budget_errors_after_first_invalid_output() -> None:
     client = ScriptedModelClient([{"expect": "understanding", "text": '{"bad": true}'}])
 
-    with pytest.raises(StructuredOutputError):
-        run_understanding_stage(
-            PromptRequest(prompt="Understand this"),
-            config=config(repair_attempts=0),
-            client=client,
-        )
+    result = run_understanding_stage(
+        PromptRequest(prompt="Understand this"),
+        config=config(repair_attempts=0),
+        client=client,
+    )
 
     assert len(client.requests) == 1
+    assert result.validated_plan.plan.clarification.action == "ask_clarification"

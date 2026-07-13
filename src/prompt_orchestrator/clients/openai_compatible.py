@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from types import TracebackType
+from typing import Any, cast
 
 import httpx
 
@@ -17,6 +18,7 @@ from prompt_orchestrator.exceptions import (
     ProviderError,
     ProviderTimeoutError,
 )
+from prompt_orchestrator.redaction import redact_value
 
 TRANSIENT_STATUS_CODES = {500, 502, 503, 504}
 
@@ -37,10 +39,28 @@ class OpenAICompatibleModelClient:
         self._transient_retries = transient_retries
         self._client = http_client or httpx.Client(verify=provider.verify_tls)
         self._owns_client = http_client is None
+        self._closed = False
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         if self._owns_client:
             self._client.close()
+
+    async def aclose(self) -> None:
+        self.close()
+
+    def __enter__(self) -> OpenAICompatibleModelClient:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def generate(self, request: ModelRequest) -> ModelResponse:
         payload = self._build_payload(request)
@@ -99,6 +119,9 @@ class OpenAICompatibleModelClient:
         headers = dict(self._provider.default_headers)
         if self._provider.api_key is not None:
             headers["Authorization"] = f"Bearer {self._provider.api_key.reveal()}"
+        for name, secret_header in self._provider.secret_headers.items():
+            if secret_header.value is not None:
+                headers[str(name)] = secret_header.value.reveal()
         return headers
 
     def _parse_response(self, response: httpx.Response) -> ModelResponse:
@@ -201,4 +224,4 @@ def _safe_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
         metadata["object"] = object_type
     if isinstance(created, int):
         metadata["created"] = created
-    return metadata
+    return cast(dict[str, Any], redact_value(metadata))

@@ -5,9 +5,6 @@ You are the understanding stage. Analyze the request and return exactly one JSON
 Available strategies:
 $strategy_registry
 
-Available worker roles:
-$available_roles
-
 Requested output mode:
 $requested_output_mode
 

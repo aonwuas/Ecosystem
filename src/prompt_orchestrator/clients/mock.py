@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from types import TracebackType
+from typing import Self
 
 from prompt_orchestrator.domain import ModelRequest, ModelResponse, TokenUsage
 from prompt_orchestrator.exceptions import ProviderError
@@ -15,6 +17,8 @@ class MockModelClient:
     def __init__(self, text: str = "Mock response") -> None:
         self.text = text
         self.requests: list[ModelRequest] = []
+        self.close_count = 0
+        self._closed = False
 
     def generate(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
@@ -25,6 +29,26 @@ class MockModelClient:
             usage=TokenUsage(),
             provider_metadata={"provider": "mock"},
         )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.close_count += 1
+
+    async def aclose(self) -> None:
+        self.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 @dataclass(frozen=True)
@@ -45,6 +69,8 @@ class ScriptedModelClient:
         self._script = [self._coerce_step(step) for step in script]
         self.requests: list[ModelRequest] = []
         self._index = 0
+        self.close_count = 0
+        self._closed = False
 
     @property
     def remaining(self) -> int:
@@ -74,6 +100,26 @@ class ScriptedModelClient:
             usage=TokenUsage(),
             provider_metadata={"provider": "scripted"},
         )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.close_count += 1
+
+    async def aclose(self) -> None:
+        self.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
     @staticmethod
     def _coerce_step(step: ScriptedResponse | dict[str, object]) -> ScriptedResponse:

@@ -225,7 +225,8 @@ pipeline asks for roles, not URLs or provider-specific payloads.
   running, the `base_url` ends at `/v1`, and the configured model alias matches
   the server.
 - API keys should be referenced by environment-variable name in YAML. Do not put
-  real secret values in committed config files.
+  real secret values in committed config files. Put private HTTP header values
+  under `secret_headers`, not `default_headers`.
 
 ## MVP completion checklist
 

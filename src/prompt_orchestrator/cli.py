@@ -178,6 +178,7 @@ def _handle_understand(args: argparse.Namespace) -> int:
                 print(_render_trace_text(result.trace))
         return 0
     finally:
+        client.close()
         reset_current_llm_io_recorder(token)
         _emit_llm_io(args, recorder)
 
@@ -204,6 +205,7 @@ def _handle_plan(args: argparse.Namespace) -> int:
             return 0
         return _status_exit_code(result.final_response.status.value)
     finally:
+        client.close()
         reset_current_llm_io_recorder(token)
         _emit_llm_io(args, recorder)
 
@@ -228,6 +230,7 @@ def _handle_run(args: argparse.Namespace) -> int:
                 print(_render_trace_text(response.trace))
         return _status_exit_code(response.status.value)
     finally:
+        client.close()
         reset_current_llm_io_recorder(token)
         _emit_llm_io(args, recorder)
 

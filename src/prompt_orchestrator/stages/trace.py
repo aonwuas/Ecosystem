@@ -6,9 +6,11 @@ import json
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 from prompt_orchestrator.domain import ModelMessage, Trace, TraceEvent
+from prompt_orchestrator.domain._base import JsonValue
+from prompt_orchestrator.redaction import redact_known_secrets, redact_value
 
 
 class TraceCollector:
@@ -48,23 +50,22 @@ class TraceCollector:
 
 
 def _sanitize_details(details: dict[str, Any]) -> dict[str, Any]:
-    sanitized: dict[str, Any] = {}
-    for key, value in details.items():
-        lowered = key.lower()
-        if "secret" in lowered or "api_key" in lowered or "authorization" in lowered:
-            sanitized[key] = "[REDACTED]"
-        elif isinstance(value, str | int | float | bool) or value is None:
-            sanitized[key] = value
-        elif isinstance(value, list):
-            sanitized[key] = [
-                item
-                if isinstance(item, str | int | float | bool) or item is None
-                else str(item)
-                for item in value
-            ]
-        else:
-            sanitized[key] = str(value)
-    return sanitized
+    return cast(
+        dict[str, Any],
+        _trace_json_value(redact_value(_trace_json_value(details))),
+    )
+
+
+def _trace_json_value(value: Any) -> JsonValue:
+    if isinstance(value, str):
+        return redact_known_secrets(value)
+    if isinstance(value, int | float | bool) or value is None:
+        return value
+    if isinstance(value, list):
+        return [_trace_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _trace_json_value(item) for key, item in value.items()}
+    return redact_known_secrets(str(value))
 
 
 @dataclass(frozen=True)
@@ -91,21 +92,26 @@ class LlmIoCallRecord:
     provider_error: str | None = None
 
     def to_jsonable(self) -> dict[str, object]:
-        return {
-            "stage": self.stage,
-            "role": self.role,
-            "model_name": self.model_name,
-            "provider_name": self.provider_name,
-            "provider_type": self.provider_type,
-            "request_messages": [
-                {"role": message.role, "content": message.content}
-                for message in self.request_messages
-            ],
-            "raw_response_text": self.raw_response_text,
-            "extracted_json": self.extracted_json,
-            "validation_error": self.validation_error,
-            "provider_error": self.provider_error,
-        }
+        return cast(
+            dict[str, object],
+            redact_value(
+                {
+                    "stage": self.stage,
+                    "role": self.role,
+                    "model_name": self.model_name,
+                    "provider_name": self.provider_name,
+                    "provider_type": self.provider_type,
+                    "request_messages": [
+                        {"role": message.role, "content": message.content}
+                        for message in self.request_messages
+                    ],
+                    "raw_response_text": self.raw_response_text,
+                    "extracted_json": self.extracted_json,
+                    "validation_error": self.validation_error,
+                    "provider_error": self.provider_error,
+                }
+            ),
+        )
 
 
 class LlmIoTraceRecorder:
@@ -145,7 +151,9 @@ class LlmIoTraceRecorder:
         self._active_index = index
 
     def finish_provider_error(self, index: int, error: Exception) -> None:
-        self.records[index].provider_error = f"{type(error).__name__}: {error}"
+        self.records[index].provider_error = redact_known_secrets(
+            f"{type(error).__name__}: {error}"
+        )
         self._active_index = index
 
     def record_extracted_json(self, text: str) -> None:
@@ -170,24 +178,38 @@ class LlmIoTraceRecorder:
                 ]
             )
             for message in record.request_messages:
-                rendered.extend([f"[{message.role}]", message.content, ""])
+                rendered.extend(
+                    [f"[{message.role}]", redact_known_secrets(message.content), ""]
+                )
             rendered.extend(
                 [
                     "----- RAW RESPONSE -----",
-                    record.raw_response_text or "",
+                    redact_known_secrets(record.raw_response_text or ""),
                 ]
             )
             if record.extracted_json is not None:
                 rendered.extend(
-                    ["", "----- EXTRACTED JSON -----", record.extracted_json]
+                    [
+                        "",
+                        "----- EXTRACTED JSON -----",
+                        redact_known_secrets(record.extracted_json),
+                    ]
                 )
             if record.validation_error is not None:
                 rendered.extend(
-                    ["", "----- VALIDATION ERROR -----", record.validation_error]
+                    [
+                        "",
+                        "----- VALIDATION ERROR -----",
+                        redact_known_secrets(record.validation_error),
+                    ]
                 )
             if record.provider_error is not None:
                 rendered.extend(
-                    ["", "----- PROVIDER ERROR -----", record.provider_error]
+                    [
+                        "",
+                        "----- PROVIDER ERROR -----",
+                        redact_known_secrets(record.provider_error),
+                    ]
                 )
             rendered.extend(["", f"===== END LLM CALL: {record.stage} =====", ""])
         return "\n".join(rendered).rstrip()

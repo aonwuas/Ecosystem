@@ -10,7 +10,6 @@ from prompt_orchestrator.domain._base import DomainModel, ShortText, StringList
 from prompt_orchestrator.domain.enums import (
     AmbiguityLevel,
     ClarificationAction,
-    ModelRole,
     OutputMode,
     RiskLevel,
     StrategyId,
@@ -72,7 +71,6 @@ class ExecutionPlan(DomainModel):
     understanding: TaskUnderstanding
     clarification: ClarificationDecision
     strategy: StrategyId
-    worker_role: ModelRole
     output_contract: OutputContract
     must_include: StringList = Field(default_factory=list)
     must_avoid: StringList = Field(default_factory=list)

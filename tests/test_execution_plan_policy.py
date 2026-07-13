@@ -13,13 +13,12 @@ from prompt_orchestrator.domain import (
 from prompt_orchestrator.domain.enums import (
     AmbiguityLevel,
     ClarificationAction,
-    ModelRole,
     OutputMode,
     RiskLevel,
     StrategyId,
     TaskComplexity,
 )
-from prompt_orchestrator.exceptions import ExecutionPlanValidationError, PolicyError
+from prompt_orchestrator.exceptions import PolicyError
 from prompt_orchestrator.policy import PolicyOutcome, evaluate_execution_plan_policy
 
 
@@ -59,7 +58,6 @@ def config(*, enable_critic: bool = True) -> PromptOrchestratorConfig:
 def plan(
     *,
     strategy: StrategyId = StrategyId.COMPARISON,
-    worker_role: ModelRole = ModelRole.WORKER,
     mode: OutputMode = OutputMode.MARKDOWN,
     action: ClarificationAction = ClarificationAction.PROCEED,
     question: str | None = None,
@@ -92,7 +90,6 @@ def plan(
             else "The missing detail is required.",
         ),
         strategy=strategy,
-        worker_role=worker_role,
         output_contract=OutputContract(
             mode=mode,
             structure="comparison",
@@ -131,28 +128,12 @@ def test_unregistered_strategy_cannot_execute() -> None:
         )
 
 
-def test_invalid_model_role_cannot_execute() -> None:
-    invalid = plan().model_copy(update={"worker_role": "tool_runner"})
+def test_model_supplied_worker_role_is_rejected_by_schema() -> None:
+    data = plan().model_dump(mode="json")
+    data["worker_role"] = "critic"
 
-    with pytest.raises(ExecutionPlanValidationError, match="worker_role"):
-        evaluate_execution_plan_policy(
-            invalid,
-            request=PromptRequest(prompt="Compare options"),
-            config=config(),
-        )
-
-
-def test_specialist_model_role_is_forced_to_worker_role() -> None:
-    evaluation = evaluate_execution_plan_policy(
-        plan(worker_role=ModelRole.CRITIC),
-        request=PromptRequest(prompt="Compare options"),
-        config=config(),
-    )
-
-    assert evaluation.validated_plan.plan.worker_role is ModelRole.WORKER
-    assert "worker_role changed from 'critic' to 'worker'" in (
-        evaluation.validated_plan.policy_changes
-    )
+    with pytest.raises(ValueError, match="worker_role"):
+        ExecutionPlan.model_validate(data)
 
 
 def test_caller_output_mode_override_takes_precedence_when_supported() -> None:

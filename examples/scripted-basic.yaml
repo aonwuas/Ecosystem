@@ -21,7 +21,6 @@
       question: null
       reason: A useful comparison can proceed with explicit assumptions.
     strategy: comparison
-    worker_role: worker
     output_contract:
       mode: markdown
       structure: comparison with recommendation

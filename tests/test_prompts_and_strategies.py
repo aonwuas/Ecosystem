@@ -128,7 +128,6 @@ def test_understanding_template_has_contract_and_delimiters() -> None:
             "caller_context": "Context text.",
             "requested_output_mode": "markdown",
             "strategy_registry": strategy_registry_summary(),
-            "available_roles": "worker",
             "execution_plan_schema": "ExecutionPlan fields.",
             "clarification_policy": "Ask only when needed.",
         },

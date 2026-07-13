@@ -16,7 +16,7 @@ from prompt_orchestrator.domain import (
     PromptPlan,
     ValidatedExecutionPlan,
 )
-from prompt_orchestrator.domain.enums import ClarificationAction, ModelRole
+from prompt_orchestrator.domain.enums import ClarificationAction
 from prompt_orchestrator.exceptions import PolicyError, WorkerError
 from prompt_orchestrator.prompts import (
     COMMON_WORKER_VARIABLES,
@@ -75,7 +75,7 @@ def build_worker_prompt_plan(
 
     return PromptPlan(
         strategy=plan.strategy,
-        worker_role=plan.worker_role,
+        worker_role=strategy.worker_role,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         output_contract=plan.output_contract,
@@ -135,11 +135,6 @@ def _ensure_worker_allowed(validated_plan: ValidatedExecutionPlan) -> None:
         raise PolicyError(
             "Refusal plans do not proceed to worker generation.",
             code="WORKER_REFUSED",
-        )
-    if plan.worker_role is not ModelRole.WORKER:
-        raise PolicyError(
-            "Worker generation requires the worker role.",
-            code="WORKER_ROLE_REQUIRED",
         )
 
 

@@ -63,8 +63,7 @@ The understanding model must:
 - caller-supplied context;
 - caller output-mode override;
 - available strategy registry summary;
-- available worker roles;
-- execution-plan schema summary;
+- exact execution-plan JSON skeleton;
 - clarification policy.
 
 ### Output
@@ -75,7 +74,8 @@ The understanding prompt must include an exact nested JSON skeleton for the
 `ExecutionPlan`. In particular, `understanding`, `clarification`, and
 `output_contract` must be shown as objects, and list fields such as
 `quality_criteria` must be shown as arrays. The prompt must not rely on prose
-alone to describe nested fields.
+alone to describe nested fields. The prompt must not ask the model to output
+`worker_role`; worker role selection is trusted application metadata.
 
 ### Repair prompt
 
@@ -91,21 +91,18 @@ On invalid output, one repair request includes:
 
 The repair model is the same configured understanding role in the MVP.
 
-## 4. Safe fallback plan
+## 4. Understanding failure clarification
 
-When configured, deterministic fallback is intentionally generic:
+When understanding structured-output validation fails after the bounded repair
+attempt, the MVP fails safely by returning a clarification-required plan:
 
-- goal: respond helpfully to the literal prompt;
-- complexity: `moderate`;
-- ambiguity: `medium`;
-- risk: `low` unless deterministic safety signals require caution;
-- clarification: proceed unless prompt is empty or clearly lacks required referenced content;
-- strategy: `direct_answer` or `structured_analysis` based on explicit caller mode;
-- worker role: `worker`;
-- critic required: true;
+- clarification action: `ask_clarification`;
+- strategy: `structured_analysis`;
+- ambiguity and risk: high;
+- worker, critic, and revision stages are not called;
 - warning: understanding model output could not be validated.
 
-The fallback must be trace-visible and must not pretend to understand nuanced intent.
+The clarification must not pretend to understand nuanced intent.
 
 ## 5. Worker strategy contract
 

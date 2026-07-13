@@ -12,6 +12,7 @@ Cover:
 
 - configuration loading and validation;
 - environment-secret resolution and redaction;
+- secret header resolution and rejection of sensitive literal headers;
 - role/model/provider resolution;
 - domain-model validation;
 - JSON extraction;
@@ -31,8 +32,7 @@ Use scripted clients to cover:
 - clarification required;
 - refusal/redirect;
 - invalid understanding JSON followed by successful repair;
-- invalid understanding JSON followed by safe fallback;
-- invalid understanding JSON followed by failure;
+- invalid understanding JSON followed by clarification-required safe failure;
 - critic recommends revision;
 - revision succeeds;
 - revision fails and original draft is preserved;
@@ -111,6 +111,7 @@ Use HTTPX mock transport or an equivalent local fake. Test:
 
 - correct endpoint path;
 - authorization header when configured;
+- secret headers when configured;
 - no authorization header when absent;
 - timeout mapping;
 - response parsing;
@@ -132,6 +133,7 @@ Invoke the installed entry point or `python -m prompt_orchestrator` in tests. Ve
 - `--stdin`;
 - `--json`;
 - `--trace`.
+- `--show-llm-io` and `--save-llm-io`.
 
 ## 8. Quality gates
 

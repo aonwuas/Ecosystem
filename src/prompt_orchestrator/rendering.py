@@ -12,6 +12,7 @@ from prompt_orchestrator.domain import (
     ValidatedExecutionPlan,
 )
 from prompt_orchestrator.pipeline import PipelinePlanResult
+from prompt_orchestrator.strategies import get_strategy
 
 
 def render_json(value: object) -> str:
@@ -32,13 +33,20 @@ def render_final_text(response: FinalResponse) -> str:
 def render_understand_text(plan: ValidatedExecutionPlan) -> str:
     """Render a compact understanding summary."""
     execution_plan = plan.plan
+    status = (
+        "clarification_required"
+        if execution_plan.clarification.action.value == "ask_clarification"
+        else "understood"
+    )
     lines = [
-        "Status: understood",
+        f"Status: {status}",
         f"Strategy: {execution_plan.strategy.value}",
-        f"Worker role: {execution_plan.worker_role.value}",
+        f"Worker role: {get_strategy(execution_plan.strategy).worker_role.value}",
         f"Goal: {execution_plan.understanding.user_goal}",
         f"Clarification: {execution_plan.clarification.action.value}",
     ]
+    if execution_plan.clarification.question is not None:
+        lines.append(f"Question: {execution_plan.clarification.question}")
     if plan.policy_changes:
         lines.append("Policy changes:")
         lines.extend(f"- {change}" for change in plan.policy_changes)

@@ -9,6 +9,7 @@ from prompt_orchestrator.clients import (
     ClientFactory,
     MockModelClient,
     OpenAICompatibleModelClient,
+    RoutedModelClient,
     ScriptedModelClient,
 )
 from prompt_orchestrator.config.models import (
@@ -194,6 +195,30 @@ def test_openai_compatible_uses_api_key_when_configured(
     assert authorization_headers == ["Bearer secret-value"]
 
 
+def test_openai_compatible_uses_secret_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROMPT_ORCHESTRATOR_HEADER_TOKEN", "header-secret")
+    provider = OpenAICompatibleProviderConfig(
+        type="openai_compatible",
+        base_url="https://api.example.test/v1",
+        default_headers={"X-Organization": "example-org"},
+        secret_headers={"X-Private-Token": {"env": "PROMPT_ORCHESTRATOR_HEADER_TOKEN"}},
+    )
+    captured_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_headers.append(request.headers)
+        return ok_response()
+
+    client = openai_client(httpx.MockTransport(handler), provider=provider)
+
+    client.generate(model_request())
+
+    assert captured_headers[0]["x-organization"] == "example-org"
+    assert captured_headers[0]["x-private-token"] == "header-secret"
+
+
 def test_openai_compatible_transient_retry_is_bounded() -> None:
     statuses = [500, 200]
     calls = 0
@@ -338,3 +363,33 @@ def test_client_factory_creates_mock_and_openai_clients() -> None:
         ClientFactory(openai_config).create_for_role(ModelRole.WORKER),
         OpenAICompatibleModelClient,
     )
+
+
+def test_routed_client_close_is_idempotent_for_shared_clients() -> None:
+    shared = MockModelClient()
+    routed = RoutedModelClient(
+        {
+            ModelRole.UNDERSTANDING: shared,
+            ModelRole.WORKER: shared,
+            ModelRole.CRITIC: shared,
+            ModelRole.REVISION: shared,
+        }
+    )
+
+    routed.close()
+    routed.close()
+
+    assert shared.close_count == 1
+
+
+def test_mock_and_scripted_clients_close_without_lifecycle_errors() -> None:
+    mock = MockModelClient()
+    scripted = ScriptedModelClient([{"expect": "worker", "text": "Draft"}])
+
+    mock.close()
+    mock.close()
+    scripted.close()
+    scripted.close()
+
+    assert mock.close_count == 1
+    assert scripted.close_count == 1

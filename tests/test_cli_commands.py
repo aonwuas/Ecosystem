@@ -40,7 +40,6 @@ def plan_payload(
             ),
         },
         "strategy": "comparison",
-        "worker_role": "worker",
         "output_contract": {
             "mode": "markdown",
             "structure": "comparison with recommendation",
@@ -79,7 +78,6 @@ def apology_plan_payload() -> dict[str, object]:
             ),
         },
         "strategy": "draft_generation",
-        "worker_role": "worker",
         "output_contract": {
             "mode": "markdown",
             "structure": "professional email draft",
@@ -195,7 +193,6 @@ def invalid_schema_understanding_script() -> list[dict[str, object]]:
                 "understanding": {"summary": "unique_schema_raw_value"},
                 "clarification": {"needs_clarification": False},
                 "strategy": "draft_generation",
-                "worker_role": "worker",
                 "output_contract": {"format": "email"},
                 "must_include": [],
                 "must_avoid": [],
@@ -320,6 +317,22 @@ def test_run_show_llm_io_includes_multiple_stage_records(tmp_path: Path) -> None
     assert "===== LLM CALL: critic =====" in result.stderr
 
 
+def test_run_accepts_markdown_output_mode_override(tmp_path: Path) -> None:
+    config_path = write_cli_config(tmp_path, full_run_script())
+
+    result = cli(
+        "run",
+        "Help me choose between SQLite and PostgreSQL.",
+        "--config",
+        str(config_path),
+        "--output-mode",
+        "markdown",
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "Draft answer.\n"
+
+
 def test_run_with_trace_keeps_user_prompt_out_of_trace(tmp_path: Path) -> None:
     prompt = "Help me choose between SQLite and PostgreSQL."
     config_path = write_cli_config(tmp_path, full_run_script())
@@ -422,7 +435,7 @@ def test_understand_json_renders_validated_plan(tmp_path: Path) -> None:
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["plan"]["strategy"] == "comparison"
-    assert payload["plan"]["worker_role"] == "worker"
+    assert "worker_role" not in payload["plan"]
 
 
 def test_understand_professional_apology_email_with_correct_schema(
@@ -478,11 +491,12 @@ def test_schema_failure_debug_includes_raw_response_but_normal_does_not(
         "--show-llm-io",
     )
 
-    assert normal.returncode == 5
-    assert debug.returncode == 5
+    assert normal.returncode == 0
+    assert debug.returncode == 0
     assert "unique_schema_raw_value" not in normal.stderr
     assert "unique_schema_raw_value" in debug.stderr
     assert "----- VALIDATION ERROR -----" in debug.stderr
+    assert "couldn't confidently interpret" in normal.stdout
 
 
 def test_plan_does_not_call_worker(tmp_path: Path) -> None:

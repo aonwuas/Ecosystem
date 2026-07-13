@@ -110,7 +110,6 @@ def validated_plan():
             reason="A conditional answer is useful.",
         ),
         strategy=StrategyId.COMPARISON,
-        worker_role=ModelRole.WORKER,
         output_contract=OutputContract(
             mode=OutputMode.MARKDOWN,
             structure="comparison with recommendation",

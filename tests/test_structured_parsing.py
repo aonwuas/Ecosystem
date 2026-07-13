@@ -37,7 +37,6 @@ def execution_plan_json() -> str:
     "reason": "A conditional answer can be useful."
   },
   "strategy": "comparison",
-  "worker_role": "worker",
   "output_contract": {
     "mode": "markdown",
     "structure": "comparison with recommendation",
@@ -87,7 +86,7 @@ def test_common_fenced_json_is_accepted() -> None:
     result = validate_structured_output(fenced, ExecutionPlan)
 
     assert result.value.strategy == "comparison"
-    assert result.raw_object["worker_role"] == "worker"
+    assert "worker_role" not in result.raw_object
 
 
 def test_limited_surrounding_prose_is_accepted() -> None:

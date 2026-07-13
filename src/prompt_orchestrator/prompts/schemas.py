@@ -21,7 +21,6 @@ EXECUTION_PLAN_JSON_SKELETON = """{
     "reason": "..."
   },
   "strategy": "draft_generation",
-  "worker_role": "worker",
   "output_contract": {
     "mode": "text | markdown | json",
     "structure": "...",
@@ -46,6 +45,8 @@ EXECUTION_PLAN_SCHEMA_RULES = """Rules:
 - output_contract must be an object with mode, structure, tone, length, and audience.
 - output_contract may not use format or content fields.
 - quality_criteria, must_include, and must_avoid must be arrays, not strings.
+- Do not include worker_role; worker roles are selected by trusted application
+  strategy metadata.
 - Do not add top-level rationale, assumptions, uncertainties, summary, or
   explanation fields.
 - Put assumptions and uncertainties inside understanding only."""

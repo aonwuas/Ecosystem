@@ -14,6 +14,7 @@ from prompt_orchestrator.config import (
 )
 from prompt_orchestrator.domain.enums import ModelRole
 from prompt_orchestrator.exceptions import ConfigurationError
+from prompt_orchestrator.stages.trace import LlmIoTraceRecorder, TraceCollector
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -194,6 +195,252 @@ runtime: {}
     assert provider.base_url == "https://api.example.test/v1"
     assert "secret-value" not in repr(provider)
     assert "secret-value" not in config.model_dump_json()
+
+
+def test_secret_headers_resolve_from_environment_and_are_redacted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROMPT_ORCHESTRATOR_HEADER_TOKEN", "header-secret")
+    path = write_config(
+        tmp_path,
+        """
+version: 1
+providers:
+  hosted:
+    type: openai_compatible
+    base_url: https://api.example.test/v1
+    default_headers:
+      X-Organization: example-org
+    secret_headers:
+      X-Private-Token:
+        env: PROMPT_ORCHESTRATOR_HEADER_TOKEN
+models:
+  hosted_general:
+    provider: hosted
+    model: hosted-model
+roles:
+  understanding: hosted_general
+  worker: hosted_general
+  critic: hosted_general
+  revision: hosted_general
+runtime: {}
+""",
+    )
+
+    config = load_config_from_path(path)
+    summary = summarize_config(config)
+
+    provider = config.providers["hosted"]
+    assert provider.type == "openai_compatible"
+    assert provider.secret_headers["X-Private-Token"].value is not None
+    assert "header-secret" not in provider.model_dump_json()
+    assert "header-secret" not in summary.model_dump_json()
+
+
+def test_missing_secret_header_environment_variable_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PROMPT_ORCHESTRATOR_HEADER_TOKEN", raising=False)
+    path = write_config(
+        tmp_path,
+        """
+version: 1
+providers:
+  hosted:
+    type: openai_compatible
+    base_url: https://api.example.test/v1
+    secret_headers:
+      X-Private-Token:
+        env: PROMPT_ORCHESTRATOR_HEADER_TOKEN
+models:
+  hosted_general:
+    provider: hosted
+    model: hosted-model
+roles:
+  understanding: hosted_general
+  worker: hosted_general
+  critic: hosted_general
+  revision: hosted_general
+runtime: {}
+""",
+    )
+
+    with pytest.raises(ConfigurationError, match="PROMPT_ORCHESTRATOR_HEADER_TOKEN"):
+        load_config_from_path(path)
+
+
+def test_sensitive_literal_default_header_is_rejected(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+version: 1
+providers:
+  hosted:
+    type: openai_compatible
+    base_url: https://api.example.test/v1
+    default_headers:
+      Authorization: Bearer inline-secret
+models:
+  hosted_general:
+    provider: hosted
+    model: hosted-model
+roles:
+  understanding: hosted_general
+  worker: hosted_general
+  critic: hosted_general
+  revision: hosted_general
+runtime: {}
+""",
+    )
+
+    with pytest.raises(ConfigurationError, match="secret_headers"):
+        load_config_from_path(path)
+
+
+def test_known_secret_values_are_redacted_in_traces_and_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROMPT_ORCHESTRATOR_HEADER_TOKEN", "nested-secret")
+    path = write_config(
+        tmp_path,
+        """
+version: 1
+providers:
+  hosted:
+    type: openai_compatible
+    base_url: https://api.example.test/v1
+    secret_headers:
+      X-Private-Token:
+        env: PROMPT_ORCHESTRATOR_HEADER_TOKEN
+models:
+  hosted_general:
+    provider: hosted
+    model: hosted-model
+roles:
+  understanding: hosted_general
+  worker: hosted_general
+  critic: hosted_general
+  revision: hosted_general
+runtime: {}
+""",
+    )
+    load_config_from_path(path)
+
+    trace = TraceCollector()
+    trace.add_event(
+        stage="test",
+        event="secret",
+        status="ok",
+        details={
+            "generic": "prefix nested-secret suffix",
+            "nested": {"url": "https://example.test/?token=nested-secret"},
+            "headers": {"X-Private-Token": "nested-secret"},
+        },
+    )
+    trace_text = trace.to_trace().model_dump_json()
+
+    recorder = LlmIoTraceRecorder()
+    index = recorder.start_call(
+        stage="worker",
+        role="worker",
+        model_name="model",
+        provider_name="provider",
+        provider_type="mock",
+        messages=[],
+    )
+    recorder.finish_call(index, "model returned nested-secret")
+
+    assert "nested-secret" not in trace_text
+    assert "nested-secret" not in recorder.render_text()
+    assert "nested-secret" not in recorder.render_jsonl()
+    assert "[REDACTED]" in trace_text
+
+
+def test_removed_trace_settings_are_rejected(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+version: 1
+providers:
+  scripted:
+    type: mock
+    fixture_path: tests/fixtures/scripted_models.yaml
+models:
+  scripted_general:
+    provider: scripted
+    model: scripted-model
+roles:
+  understanding: scripted_general
+  worker: scripted_general
+  critic: scripted_general
+  revision: scripted_general
+runtime:
+  trace:
+    enabled_by_default: false
+    include_full_prompts: true
+""",
+    )
+
+    with pytest.raises(ConfigurationError, match="include_full_prompts"):
+        load_config_from_path(path)
+
+
+def test_markdown_runtime_default_output_mode_validates(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+version: 1
+providers:
+  scripted:
+    type: mock
+    fixture_path: tests/fixtures/scripted_models.yaml
+models:
+  scripted_general:
+    provider: scripted
+    model: scripted-model
+roles:
+  understanding: scripted_general
+  worker: scripted_general
+  critic: scripted_general
+  revision: scripted_general
+runtime:
+  default_output_mode: markdown
+""",
+    )
+
+    config = load_config_from_path(path)
+
+    assert config.runtime.default_output_mode.value == "markdown"
+
+
+def test_invalid_runtime_default_output_mode_fails(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+version: 1
+providers:
+  scripted:
+    type: mock
+    fixture_path: tests/fixtures/scripted_models.yaml
+models:
+  scripted_general:
+    provider: scripted
+    model: scripted-model
+roles:
+  understanding: scripted_general
+  worker: scripted_general
+  critic: scripted_general
+  revision: scripted_general
+runtime:
+  default_output_mode: html
+""",
+    )
+
+    with pytest.raises(ConfigurationError, match="default_output_mode"):
+        load_config_from_path(path)
 
 
 def test_runtime_bounds_and_unknown_keys_are_rejected(tmp_path: Path) -> None:

@@ -18,7 +18,6 @@ from prompt_orchestrator.domain import (
 from prompt_orchestrator.domain._base import MAX_LIST_ITEMS
 from prompt_orchestrator.domain.enums import (
     ClarificationAction,
-    ModelRole,
     OutputMode,
     RiskLevel,
     StrategyId,
@@ -57,7 +56,6 @@ def evaluate_execution_plan_policy(
     warnings: list[str] = []
 
     strategy = _registered_strategy(plan.strategy, registry)
-    worker_role = _configured_worker_role(plan.worker_role, config, changes)
     output_contract = _apply_output_mode_policy(
         plan=plan,
         request=request,
@@ -93,7 +91,6 @@ def evaluate_execution_plan_policy(
         understanding=_normalize_understanding(plan.understanding, changes),
         clarification=clarification,
         strategy=plan.strategy,
-        worker_role=worker_role,
         output_contract=output_contract,
         must_include=must_include,
         must_avoid=must_avoid,
@@ -131,23 +128,6 @@ def _registered_strategy(
             code="POLICY_STRATEGY_NOT_REGISTERED",
         )
     return registry[strategy_id]
-
-
-def _configured_worker_role(
-    worker_role: ModelRole,
-    config: PromptOrchestratorConfig,
-    changes: list[str],
-) -> ModelRole:
-    if not isinstance(worker_role, ModelRole):
-        raise ExecutionPlanValidationError(
-            "Execution plan worker_role is not a registered ModelRole.",
-            code="PLAN_ROLE_INVALID",
-        )
-    config.resolve_role(worker_role)
-    if worker_role is not ModelRole.WORKER:
-        changes.append(f"worker_role changed from '{worker_role.value}' to 'worker'")
-        return ModelRole.WORKER
-    return worker_role
 
 
 def _apply_output_mode_policy(

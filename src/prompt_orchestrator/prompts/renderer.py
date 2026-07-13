@@ -13,7 +13,6 @@ UNDERSTANDING_VARIABLES = frozenset(
         "caller_context",
         "requested_output_mode",
         "strategy_registry",
-        "available_roles",
         "execution_plan_schema",
         "clarification_policy",
     }

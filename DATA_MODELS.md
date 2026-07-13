@@ -182,7 +182,6 @@ The central model-produced object.
   "understanding": {"...": "TaskUnderstanding"},
   "clarification": {"...": "ClarificationDecision"},
   "strategy": "comparison",
-  "worker_role": "worker",
   "output_contract": {"...": "OutputContract"},
   "must_include": ["tradeoffs", "conditional recommendation"],
   "must_avoid": ["pretending missing scale requirements are known"],
@@ -199,7 +198,8 @@ Rules:
 
 - `schema_version` must equal `1`;
 - `strategy` must be registered;
-- `worker_role` must be a configured allowed role, normally `worker`;
+- `worker_role` is not part of the model-produced plan; worker role selection
+  is derived from trusted strategy metadata during prompt planning;
 - caller output-mode override takes precedence when compatible;
 - plan lists are deduplicated and bounded;
 - `critic_required` may be overridden by deterministic runtime policy;
@@ -217,6 +217,10 @@ Application-owned wrapper around the accepted plan:
   "used_safe_fallback": false
 }
 ```
+
+`used_safe_fallback` remains the public compatibility field for deterministic
+understanding-stage fallback behavior. In the current MVP that fallback is a
+clarification-required plan, not a generic answer.
 
 ## 9. ModelRequest
 
@@ -270,7 +274,9 @@ Used by the `plan` CLI command and worker stage.
 }
 ```
 
-Full prompt fields may be omitted/redacted in normal JSON output according to trace policy.
+`worker_role` is derived from the application-owned strategy registry, not from
+model output. Full prompt fields may be omitted/redacted in normal JSON output
+according to trace policy.
 
 ## 12. DraftResponse
 
@@ -353,6 +359,7 @@ Application-owned critic outcome:
 ```
 
 For clarification, `text` may be empty and `clarification_question` is required.
+`used_safe_fallback` has the same meaning as on `ValidatedExecutionPlan`.
 
 ## 17. Trace models
 

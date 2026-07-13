@@ -103,7 +103,6 @@ def execution_plan(
             else "A required detail is missing.",
         ),
         strategy=strategy,
-        worker_role=ModelRole.WORKER,
         output_contract=OutputContract(
             mode=mode,
             structure="comparison with recommendation",

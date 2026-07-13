@@ -31,6 +31,7 @@ providers:
     base_url: http://192.168.1.20:8080/v1
     api_key_env: null
     default_headers: {}
+    secret_headers: {}
     verify_tls: true
 ```
 
@@ -39,8 +40,28 @@ Fields:
 - `type`: required; `openai_compatible` or `mock` in the MVP.
 - `base_url`: required for `openai_compatible`; normalized without a trailing slash.
 - `api_key_env`: optional environment-variable name. The value is resolved at runtime and never included in serialized config or traces.
-- `default_headers`: optional string-to-string map. Header values must not be used for secrets in committed config.
+- `default_headers`: optional string-to-string map for non-secret headers only.
+  Sensitive literal headers such as `Authorization`, `Proxy-Authorization`,
+  `X-Api-Key`, and `Api-Key` are rejected; use `secret_headers`.
+- `secret_headers`: optional map of header names to environment-variable
+  references. Values are resolved at configuration load time and redacted from
+  summaries, traces, and diagnostic output.
 - `verify_tls`: optional boolean, default `true`. Local HTTP endpoints are allowed; disabling TLS verification should emit a warning for HTTPS.
+
+Secret header example:
+
+```yaml
+providers:
+  hosted_provider:
+    type: openai_compatible
+    base_url: https://example.invalid/v1
+    api_key_env: HOSTED_PROVIDER_API_KEY
+    default_headers:
+      X-Organization: example-org
+    secret_headers:
+      Authorization:
+        env: HOSTED_PROVIDER_TOKEN
+```
 
 ### Mock provider
 
@@ -102,8 +123,9 @@ Rules:
 - all four MVP roles are required;
 - values must reference named models;
 - multiple roles may reference the same model;
-- model-produced plans may select only a configured role permitted by the strategy/policy;
-- the understanding role normally selects `worker`; specialist roles are future scope unless added to the fixed schema.
+- model-produced plans do not select worker roles;
+- the trusted strategy registry selects the worker role for prompt planning;
+- every MVP strategy currently resolves to the `worker` role.
 
 ## 6. Runtime settings
 
@@ -115,13 +137,10 @@ runtime:
   strict_critic: false
   enable_revision: true
   max_revision_attempts: 1
-  understanding_failure_mode: error
+  understanding_failure_mode: clarify
   default_output_mode: text
   trace:
     enabled_by_default: false
-    include_prompt_summaries: true
-    include_full_prompts: false
-    redact_user_content: false
 ```
 
 Validation rules:
@@ -129,9 +148,12 @@ Validation rules:
 - repair attempts: `0` or `1` in the MVP;
 - transient retries: `0` or `1` in the MVP;
 - max revision attempts: `0` or `1`;
-- `understanding_failure_mode`: `error` or `safe_fallback`;
-- `default_output_mode`: `text` or `json`;
-- full prompt tracing defaults to false;
+- `understanding_failure_mode`: `clarify`;
+- `default_output_mode`: `text`, `markdown`, or `json`;
+- `trace.enabled_by_default`: optional boolean for sanitized trace inclusion;
+- previous public trace settings for prompt summaries, full prompts, and user
+  content redaction are not accepted because they are not implemented as config
+  controls in the MVP;
 - secret values are always redacted regardless of trace configuration.
 
 ## 7. Strategy policy overrides
@@ -174,6 +196,14 @@ At load time:
 - fail if it is required but missing;
 - wrap the value in a secret type;
 - exclude it from repr, JSON, logs, and traces.
+
+Secret HTTP headers use the same environment-reference pattern:
+
+```yaml
+secret_headers:
+  X-Private-Token:
+    env: PRIVATE_PROVIDER_TOKEN
+```
 
 ## 10. Example complete configuration
 

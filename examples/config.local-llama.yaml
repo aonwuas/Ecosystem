@@ -6,6 +6,7 @@ providers:
     base_url: http://127.0.0.1:8080/v1
     api_key_env: null
     default_headers: {}
+    secret_headers: {}
     verify_tls: true
 
 models:
@@ -34,11 +35,8 @@ runtime:
   strict_critic: false
   enable_revision: true
   max_revision_attempts: 1
-  understanding_failure_mode: error
+  understanding_failure_mode: clarify
   default_output_mode: text
   strategy_overrides: {}
   trace:
     enabled_by_default: false
-    include_prompt_summaries: true
-    include_full_prompts: false
-    redact_user_content: false

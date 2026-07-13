@@ -55,7 +55,6 @@ def example_execution_plan_data() -> dict[str, object]:
             "reason": "A useful conditional comparison can be provided.",
         },
         "strategy": "comparison",
-        "worker_role": "worker",
         "output_contract": {
             "mode": "markdown",
             "structure": "comparison with recommendation",
@@ -102,7 +101,7 @@ def test_documented_execution_plan_example_validates_and_serializes() -> None:
     serialized = json.loads(validated_plan.model_dump_json())
 
     assert serialized["plan"]["strategy"] == "comparison"
-    assert serialized["plan"]["worker_role"] == "worker"
+    assert "worker_role" not in serialized["plan"]
     assert serialized["used_safe_fallback"] is False
 
 
@@ -135,7 +134,7 @@ def test_draft_critic_quality_final_and_trace_examples_validate() -> None:
     plan = ExecutionPlan.model_validate(example_execution_plan_data())
     prompt_plan = PromptPlan(
         strategy=plan.strategy,
-        worker_role=plan.worker_role,
+        worker_role=ModelRole.WORKER,
         system_prompt="System prompt",
         user_prompt="User prompt",
         output_contract=plan.output_contract,

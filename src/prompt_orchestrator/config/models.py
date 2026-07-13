@@ -20,6 +20,7 @@ from pydantic import (
 
 from prompt_orchestrator.domain._base import JsonObject, JsonValue
 from prompt_orchestrator.domain.enums import ModelRole, OutputMode, StrategyId
+from prompt_orchestrator.redaction import is_sensitive_key, register_known_secret
 
 ConfigName = Annotated[
     str,
@@ -65,6 +66,29 @@ class SecretValue:
         return "********"
 
 
+class SecretHeaderConfig(ConfigModel):
+    """Environment-backed HTTP header secret."""
+
+    env: ConfigName
+    value: SecretValue | None = Field(default=None, exclude=True, repr=False)
+
+    @model_validator(mode="after")
+    def resolve_value(self) -> Self:
+        secret_value = os.environ.get(self.env)
+        if secret_value is None or secret_value == "":
+            raise ValueError(
+                f"secret header env '{self.env}' is set but the environment "
+                "variable is missing"
+            )
+        register_known_secret(secret_value)
+        object.__setattr__(self, "value", SecretValue(secret_value))
+        return self
+
+    @field_serializer("value")
+    def serialize_value(self, value: SecretValue | None) -> None:
+        return None
+
+
 class ProviderType(StrEnum):
     MOCK = "mock"
     OPENAI_COMPATIBLE = "openai_compatible"
@@ -77,6 +101,10 @@ class OpenAICompatibleProviderConfig(ConfigModel):
     base_url: str
     api_key_env: ConfigName | None = None
     default_headers: HeaderMap = Field(default_factory=dict)
+    secret_headers: dict[ConfigName, SecretHeaderConfig] = Field(
+        default_factory=dict,
+        max_length=50,
+    )
     verify_tls: bool = Field(default=True, strict=True)
     api_key: SecretValue | None = Field(default=None, exclude=True, repr=False)
 
@@ -94,6 +122,11 @@ class OpenAICompatibleProviderConfig(ConfigModel):
         for header_name, header_value in value.items():
             if not header_name.strip() or not header_value.strip():
                 raise ValueError("default_headers keys and values must be non-empty")
+            if is_sensitive_key(header_name):
+                raise ValueError(
+                    f"default_headers contains sensitive header '{header_name}'; "
+                    "use secret_headers with an environment variable"
+                )
         return value
 
     @model_validator(mode="after")
@@ -106,6 +139,7 @@ class OpenAICompatibleProviderConfig(ConfigModel):
                 f"api_key_env '{self.api_key_env}' is set but the environment "
                 "variable is missing"
             )
+        register_known_secret(secret_value)
         object.__setattr__(self, "api_key", SecretValue(secret_value))
         return self
 
@@ -161,17 +195,13 @@ class RoleBindings(ConfigModel):
 
 
 class UnderstandingFailureMode(StrEnum):
-    ERROR = "error"
-    SAFE_FALLBACK = "safe_fallback"
+    CLARIFY = "clarify"
 
 
 class TraceConfig(ConfigModel):
     """Runtime trace rendering policy."""
 
     enabled_by_default: bool = Field(default=False, strict=True)
-    include_prompt_summaries: bool = Field(default=True, strict=True)
-    include_full_prompts: bool = Field(default=False, strict=True)
-    redact_user_content: bool = Field(default=False, strict=True)
 
 
 class StrategyOverride(ConfigModel):
@@ -191,9 +221,9 @@ class RuntimeConfig(ConfigModel):
     enable_revision: bool = Field(default=True, strict=True)
     max_revision_attempts: int = Field(default=1, ge=0, le=1, strict=True)
     understanding_failure_mode: UnderstandingFailureMode = (
-        UnderstandingFailureMode.ERROR
+        UnderstandingFailureMode.CLARIFY
     )
-    default_output_mode: Literal[OutputMode.TEXT, OutputMode.JSON] = OutputMode.TEXT
+    default_output_mode: OutputMode = OutputMode.TEXT
     strategy_overrides: dict[StrategyId, StrategyOverride] = Field(
         default_factory=dict,
         max_length=20,

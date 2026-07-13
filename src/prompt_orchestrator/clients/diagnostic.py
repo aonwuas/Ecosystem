@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from types import TracebackType
+from typing import Self
+
 from prompt_orchestrator.clients.base import ModelClient
 from prompt_orchestrator.config.models import PromptOrchestratorConfig
 from prompt_orchestrator.domain import ModelRequest, ModelResponse
@@ -40,6 +43,23 @@ class DiagnosticModelClient:
             raise
         self._recorder.finish_call(index, response.text)
         return response
+
+    def close(self) -> None:
+        self._inner.close()
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 def _diagnostic_stage_name(request: ModelRequest) -> str:

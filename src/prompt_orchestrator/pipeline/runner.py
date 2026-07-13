@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import TracebackType
+from typing import Self
 
 from prompt_orchestrator.clients import ModelClient
 from prompt_orchestrator.config.models import PromptOrchestratorConfig
@@ -63,6 +65,21 @@ class PipelineRunner:
         self._config = config
         self._client = client
 
+    def close(self) -> None:
+        """Close the underlying model client."""
+        self._client.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
+
     def understand(
         self,
         request: PromptRequest,
@@ -99,7 +116,9 @@ class PipelineRunner:
                 status="ok",
                 details={
                     "strategy": understanding.validated_plan.plan.strategy.value,
-                    "safe_fallback": understanding.validated_plan.used_safe_fallback,
+                    "understanding_fallback": (
+                        understanding.validated_plan.used_safe_fallback
+                    ),
                 },
             )
             gate = finalize_plan_gate(

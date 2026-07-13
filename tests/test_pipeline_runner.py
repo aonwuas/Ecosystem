@@ -86,7 +86,6 @@ def plan_json(
                 else "A required detail is missing.",
             },
             "strategy": strategy,
-            "worker_role": "worker",
             "output_contract": {
                 "mode": "markdown",
                 "structure": "comparison with recommendation",
@@ -267,6 +266,51 @@ def test_pipeline_run_clarification_stops_before_worker() -> None:
     )
     assert len(client.requests) == 1
     assert PipelineState.CLARIFICATION_REQUIRED in result.state_history
+
+
+def test_understanding_failure_stops_before_worker_critic_or_revision() -> None:
+    client = ScriptedModelClient(
+        [
+            {"expect": "understanding", "text": '{"bad": true}'},
+            {"expect": "understanding", "text": '{"still": "bad"}'},
+        ]
+    )
+
+    result = PipelineRunner(config=config(), client=client).run(request())
+
+    assert result.final_response.status is PipelineStatus.CLARIFICATION_REQUIRED
+    assert "couldn't confidently interpret" in (
+        result.final_response.clarification_question or ""
+    )
+    assert result.final_response.text == ""
+    assert result.final_response.critic_status is CriticStatus.SKIPPED
+    assert result.final_response.revision_performed is False
+    assert [call.request_kind for call in client.requests] == [
+        "understanding",
+        "understanding",
+    ]
+    assert PipelineState.WORKER_COMPLETE not in result.state_history
+    assert PipelineState.CRITIC_COMPLETE not in result.state_history
+    assert PipelineState.REVISION_COMPLETE not in result.state_history
+
+
+def test_json_request_understanding_failure_still_requires_clarification() -> None:
+    client = ScriptedModelClient(
+        [
+            {"expect": "understanding", "text": '{"bad": true}'},
+            {"expect": "understanding", "text": '{"still": "bad"}'},
+        ]
+    )
+
+    result = PipelineRunner(config=config(), client=client).run(
+        PromptRequest(prompt="Return JSON", requested_output_mode="json")
+    )
+
+    assert result.final_response.status is PipelineStatus.CLARIFICATION_REQUIRED
+    assert [call.request_kind for call in client.requests] == [
+        "understanding",
+        "understanding",
+    ]
 
 
 def test_pipeline_run_refusal_stops_before_worker() -> None:

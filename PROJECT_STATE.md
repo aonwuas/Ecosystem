@@ -13,8 +13,8 @@ grounded handoff summary, not a replacement for inspecting code during
 implementation.
 
 - Project state schema version: 1
-- Last verified date: 2026-07-12
-- Current git commit when verified: `20d3d2c8aac8b8f078baadef2a3637599edde561`
+- Last verified date: 2026-07-13
+- Current git commit when verified: `d400530`
 - Current branch when verified: `main`
 - Package/application version: `0.1.0` from `pyproject.toml` and
   `src/prompt_orchestrator/__init__.py`
@@ -127,8 +127,10 @@ Branching behavior:
   `runtime.enable_revision` is true and `runtime.max_revision_attempts` is 1.
 - Revision failure: original worker draft is preserved with a warning.
 - Understanding failure: one repair attempt if
-  `runtime.structured_output_repair_attempts` is 1; then either error or safe
-  fallback according to `runtime.understanding_failure_mode`.
+  `runtime.structured_output_repair_attempts` is 1; then
+  `runtime.understanding_failure_mode=clarify` produces
+  `FinalResponse(status=clarification_required)` and no worker, critic, or
+  revision call occurs.
 - Critic failure: degraded result with `critic_status=not_checked` when
   `runtime.strict_critic=false`; failed pipeline when strict.
 - Worker failure: failed pipeline; no alternate worker fallback exists.
@@ -271,23 +273,26 @@ Execution-plan models in `src/prompt_orchestrator/domain/execution_plan.py`:
   `complexity`, `ambiguity`, `risk_level`, `risk_categories`,
   `missing_information`, `assumptions`, `uncertainties`,
   `concise_rationale`. Created by model understanding output or
-  `_safe_fallback_plan`; consumed by policy, worker prompt builder, finalizer.
+  `_clarification_failure_plan`; consumed by policy, worker prompt builder,
+  finalizer.
 - `ClarificationDecision`: fields `action`, `question`, `reason`.
   Validator enforces `ask_clarification` requires a question and `proceed`
   requires `question=None`. Created by understanding output/fallback; consumed
   by policy, worker gate, and finalizer.
 - `OutputContract`: fields `mode`, `structure`, `tone`, `length`, `audience`.
-  Created by understanding output/fallback; consumed by policy, worker prompt
-  builder, and final response planning.
+  Created by understanding output or clarification-failure plan; consumed by
+  policy, worker prompt builder, and final response planning.
 - `ExecutionPlan`: fields `schema_version`, `understanding`, `clarification`,
-  `strategy`, `worker_role`, `output_contract`, `must_include`, `must_avoid`,
+  `strategy`, `output_contract`, `must_include`, `must_avoid`,
   `quality_criteria`, `critic_required`. Validator requires
   `schema_version == 1`. Created from model JSON by
-  `validate_structured_output` or by `_safe_fallback_plan`; consumed by policy.
+  `validate_structured_output` or by `_clarification_failure_plan`; consumed by
+  policy. `worker_role` is not accepted from model output.
 - `ValidatedExecutionPlan`: fields `plan`, `policy_changes`,
   `validation_warnings`, `used_safe_fallback`. Created by
   `evaluate_execution_plan_policy`; consumed by worker, critic, finalizer, and
-  CLI renderers.
+  CLI renderers. The `used_safe_fallback` compatibility field is true for the
+  deterministic clarification fallback after understanding failure.
 
 Model I/O models in `src/prompt_orchestrator/domain/model_io.py`:
 
@@ -306,6 +311,7 @@ Result models in `src/prompt_orchestrator/domain/results.py`:
 - `PromptPlan`: fields `strategy`, `worker_role`, `system_prompt`,
   `user_prompt`, `output_contract`, `quality_criteria`. Created by
   `build_worker_prompt_plan`; consumed by `plan` CLI and `run_worker_stage`.
+  `worker_role` is derived from trusted strategy registry metadata.
 - `DraftResponse`: fields `text`, `model_name`, `role`, `warnings`, `usage`.
   Created by worker/revision stages; consumed by critic/quality/finalizer.
 - `CriticIssue`: fields `code`, `severity`, `message`, `criterion`. Created by
@@ -323,7 +329,8 @@ Result models in `src/prompt_orchestrator/domain/results.py`:
   `strategy`, `roles`, `assumptions`, `warnings`, `critic_status`,
   `revision_performed`, `used_safe_fallback`, `trace`. Validator enforces
   status-specific shape. Created by finalizer; consumed by CLI JSON/text output
-  and library callers.
+  and library callers. The `used_safe_fallback` field mirrors
+  `ValidatedExecutionPlan.used_safe_fallback`.
 
 Trace models:
 
@@ -359,8 +366,8 @@ Important configuration models in `src/prompt_orchestrator/config/models.py`:
 - `PromptOrchestratorConfig`: top-level `version`, `providers`, `models`,
   `roles`, `runtime`, and non-serialized `path`.
 - `OpenAICompatibleProviderConfig`: `type="openai_compatible"`, `base_url`,
-  optional `api_key_env`, `default_headers`, `verify_tls`, resolved secret
-  `api_key`.
+  optional `api_key_env`, non-secret `default_headers`, `secret_headers`,
+  `verify_tls`, resolved secret `api_key`.
 - `MockProviderConfig`: `type="mock"`, `fixture_path`.
 - `ModelConfig`: `provider`, `model`, `temperature`, `max_output_tokens`,
   `timeout_seconds`, `extra_body`, `metadata`.
@@ -369,20 +376,23 @@ Important configuration models in `src/prompt_orchestrator/config/models.py`:
   `transient_http_retries`, `enable_critic`, `strict_critic`,
   `enable_revision`, `max_revision_attempts`, `understanding_failure_mode`,
   `default_output_mode`, `strategy_overrides`, `trace`.
-- `TraceConfig`: `enabled_by_default`, `include_prompt_summaries`,
-  `include_full_prompts`, `redact_user_content`.
+- `TraceConfig`: `enabled_by_default`.
 - `StrategyOverride`: optional `enable_critic`, `enable_revision`.
 - `SecretValue`: wraps resolved secret values and redacts `repr`/`str`; raw
   access is available only through `reveal()` for provider boundary code.
 
 Environment-variable behavior:
 
-- Only `api_key_env` names are stored in YAML.
+- Only `api_key_env` and `secret_headers.*.env` names are stored in YAML.
 - `OpenAICompatibleProviderConfig.resolve_api_key` reads the environment.
+- `SecretHeaderConfig.resolve_value` reads secret header values from the
+  environment.
 - Missing non-empty required secrets fail during config validation.
 - Local OpenAI-compatible endpoints can omit API keys by setting
   `api_key_env: null`.
 - Secret values are excluded from serialized config and sanitized summaries.
+- Known secret values are registered in `redaction.py` for trace and
+  diagnostic redaction.
 
 Role resolution:
 
@@ -398,7 +408,7 @@ Implemented validation behavior:
 - Role bindings must reference existing named models.
 - `version` must be `1`.
 - Runtime repair/retry/revision counts are bounded to `0` or `1` in the MVP.
-- `default_output_mode` currently accepts `text` or `json`, not `markdown`.
+- `default_output_mode` accepts `text`, `markdown`, or `json`.
 - `summarize_config` in `src/prompt_orchestrator/config/validation.py`
   returns provider names, model names, role bindings, and selected runtime
   settings without secrets.
@@ -419,7 +429,8 @@ Planned configuration features not implemented:
 Common interface:
 
 - `ModelClient` protocol in `src/prompt_orchestrator/clients/base.py` exposes
-  `generate(request: ModelRequest) -> ModelResponse`.
+  `generate(request: ModelRequest) -> ModelResponse`, `close()`, `aclose()`,
+  and context-manager hooks.
 - Pipeline and stages depend on this interface, not HTTPX or provider payloads.
 
 Implemented providers/clients:
@@ -445,8 +456,8 @@ Implemented providers/clients:
   - API style: OpenAI-compatible `/chat/completions`.
   - Request format: JSON with `model`, `messages`, `temperature`, `max_tokens`,
     plus `ModelConfig.extra_body`.
-  - Headers: `default_headers` plus `Authorization: Bearer ...` when `api_key`
-    is resolved.
+  - Headers: non-secret `default_headers`, `Authorization: Bearer ...` when
+    `api_key` is resolved, and environment-backed `secret_headers`.
   - Response handling: reads first `choices[0].message.content`, optional
     `finish_reason`, token usage from `usage.prompt_tokens`,
     `usage.completion_tokens`, `usage.total_tokens`, and safe metadata
@@ -478,6 +489,10 @@ Client factory:
   scripts consume calls in order.
 - Otherwise `create_pipeline_client` builds a `RoutedModelClient` with one
   role-specific client per `ModelRole`.
+- `RoutedModelClient.close()` closes each unique underlying client once and is
+  idempotent. `DiagnosticModelClient.close()` delegates to the wrapped client.
+- CLI handlers close clients in `finally` blocks after successful commands and
+  controlled errors. `PipelineRunner.close()` delegates to its client.
 
 ## 8. Role system
 
@@ -506,11 +521,10 @@ Fallback behavior:
 
 - There is no role fallback chain.
 - If config references are invalid, config loading fails before a model call.
-- If a model-produced plan selects a non-worker role as `worker_role`,
-  `_configured_worker_role` in `policy/execution_plan.py` forces it to
-  `ModelRole.WORKER` and records a policy change.
-- Unknown roles normally fail during Pydantic enum validation. Tests also
-  cover a constructed invalid role in `tests/test_execution_plan_policy.py`.
+- Model-produced `ExecutionPlan` no longer accepts `worker_role`; unknown or
+  malicious role strings are rejected as extra schema input.
+- Worker role selection is derived from trusted `StrategyDefinition.worker_role`
+  metadata. Every MVP strategy currently uses `ModelRole.WORKER`.
 
 Hardcoded role locations:
 
@@ -518,8 +532,7 @@ Hardcoded role locations:
 - Stages resolve fixed roles: understanding stage uses
   `ModelRole.UNDERSTANDING`, worker uses `prompt_plan.worker_role`, critic uses
   `ModelRole.CRITIC`, revision uses `ModelRole.REVISION`.
-- Policy currently forces execution worker role to `worker`; specialist worker
-  roles are not implemented.
+- Specialist worker roles are not implemented.
 
 ## 9. Strategy system
 
@@ -562,8 +575,12 @@ Mapping from understanding output:
 
 Worker role selection:
 
-- `ExecutionPlan.worker_role` is schema-validated as a `ModelRole`.
-- Policy currently forces non-worker roles back to `worker`.
+- `ExecutionPlan` does not include `worker_role`.
+- `StrategyDefinition.worker_role` in
+  `src/prompt_orchestrator/strategies/definitions.py` is trusted application
+  metadata and defaults to `ModelRole.WORKER`.
+- `build_worker_prompt_plan` copies the role from strategy metadata into
+  `PromptPlan.worker_role`.
 
 Critic requirements:
 
@@ -581,16 +598,18 @@ Output contracts:
   also support JSON.
 - Caller output-mode override takes precedence when supported.
 
-Fallback strategy:
+Understanding failure strategy:
 
-- `_safe_fallback_plan` in `stages/understanding.py` uses `direct_answer`
-  normally and `structured_analysis` when the caller requested JSON.
+- `_clarification_failure_plan` in `stages/understanding.py` uses
+  `structured_analysis`, high ambiguity, high risk, and an
+  `ask_clarification` decision. Worker, critic, and revision are skipped by
+  finalization.
 
 Conditionals still present:
 
 - Strategy-specific execution is currently mostly prompt-template selection.
 - Policy contains conditionals for output-mode correction, critic enforcement,
-  role forcing, and clarification checks.
+  and clarification checks.
 - Quality flow has conditionals for critic skipped/failed and revision
   recommended.
 
@@ -614,12 +633,12 @@ Understanding prompt:
 - Variables: `UNDERSTANDING_VARIABLES` in `prompts/renderer.py`.
 - Purpose: ask the understanding role to return exactly one `ExecutionPlan`
   JSON object and not answer the user task.
-- Inputs: user request, caller context, requested output mode, strategy
-  registry summary, available roles, clarification policy, exact schema
-  contract.
+- Inputs: user request, caller context, requested or runtime-default output
+  mode, strategy registry summary, clarification policy, exact schema contract.
 - Schema contract: `execution_plan_schema_contract` in
   `src/prompt_orchestrator/prompts/schemas.py`, including
-  `EXECUTION_PLAN_JSON_SKELETON`.
+  `EXECUTION_PLAN_JSON_SKELETON`. The skeleton does not include
+  `worker_role`.
 - Protections: user prompt and caller context are placed in `<USER_REQUEST>`
   and `<CALLER_CONTEXT>` delimiters and described as untrusted data.
 - Versioning: template says `Contract version: 1`; `ExecutionPlan` requires
@@ -784,7 +803,8 @@ Completion states:
 
 Degraded-result behavior:
 
-- Understanding safe fallback can continue when configured.
+- Understanding structured-output failure returns clarification-required by
+  default; no worker draft is generated.
 - Non-strict critic failure returns worker draft with warning.
 - Revision failure preserves original worker draft with warning.
 
@@ -874,8 +894,8 @@ Sanitized trace:
 - In-memory only; not persisted.
 - Stores ordered `TraceEvent` objects with stage, event, status, duration,
   attempt, sanitized details, warning code, and error code.
-- `_sanitize_details` redacts keys containing `secret`, `api_key`, or
-  `authorization`.
+- `_sanitize_details` redacts sensitive key names and exact known secret values
+  registered from `api_key_env` and `secret_headers`.
 - Pipeline trace currently records high-level events such as intake normalized,
   understanding model request/response, validation, policy evaluation, worker
   generation, quality review, finalization, and failures.
@@ -890,7 +910,8 @@ Explicit LLM I/O diagnostics:
 - Also records extracted structured JSON and validation errors when parsing is
   attempted.
 - Writes human-readable stderr output or JSONL file.
-- Does not dump environment variables or API-key values.
+- Does not dump environment variables, API-key values, or resolved secret
+  header values. Exact known secret values are redacted where practical.
 
 Model and role selection records:
 
@@ -912,9 +933,8 @@ Known observability gaps:
 - No model-call count summary.
 - No prompt template version metadata beyond inline `Contract version: 1`.
 - No structured metrics, health checks, or service logs.
-- `TraceConfig.include_prompt_summaries`, `include_full_prompts`, and
-  `redact_user_content` are accepted config fields but only trace inclusion is
-  materially used by the current CLI/pipeline.
+- Prompt summary, full prompt trace, and configured user-content redaction
+  settings are not implemented and are not accepted in public config.
 
 ## 15. Error handling and fallback behavior
 
@@ -947,7 +967,8 @@ Timeout:
 
 Malformed structured output:
 
-- Understanding: repair once if budget allows; then error or safe fallback.
+- Understanding: repair once if budget allows; then clarification-required
+  final response. Worker, critic, and revision are not called.
 - Critic: repair once if budget allows; then degrade or fail depending on
   strict critic.
 - Revision: not structured; empty output is a revision failure.
@@ -959,8 +980,8 @@ Schema failure:
 Unknown role:
 
 - Config role references unknown models fail config validation.
-- Model output unknown role fails schema validation before policy.
-- Model output non-worker known role is forced to `worker` by policy.
+- Model output cannot provide `worker_role`; extra role fields fail schema
+  validation before policy.
 
 Unknown strategy:
 
@@ -1009,8 +1030,11 @@ Implemented protections:
 - Secrets are referenced by environment-variable name and resolved only in the
   config layer.
 - `SecretValue` redacts normal string/repr output and config serialization.
-- Sanitized traces redact detail keys containing `secret`, `api_key`, or
-  `authorization`.
+- `SecretHeaderConfig` resolves environment-backed secret HTTP headers.
+- Sensitive literal `default_headers` are rejected; secret headers must use
+  `secret_headers`.
+- Sanitized traces and explicit diagnostics redact sensitive key names and
+  exact known secret values via `src/prompt_orchestrator/redaction.py`.
 - OpenAI-compatible client uses HTTPX timeouts and does not include server
   error body text in `ProviderError`, avoiding reflected secret leakage from
   response bodies.
@@ -1027,7 +1051,7 @@ Protections not implemented or limited:
 - No policy layer for future tools/retrieval because those features do not
   exist.
 - `--show-llm-io` intentionally prints user prompts and raw model output; it is
-  explicit opt-in.
+  explicit opt-in. Known secret values are still redacted where practical.
 
 ## 17. Testing and quality gates
 
@@ -1067,8 +1091,8 @@ Test directory structure:
 Regression coverage includes:
 
 - Public schema examples, enum failures, and consistency validators.
-- Config search, validation, secret resolution/redaction, and CLI config
-  validation.
+- Config search, validation, secret resolution/redaction, secret header
+  handling, and CLI config validation.
 - Mock/scripted client behavior and OpenAI-compatible HTTP payload/retry/error
   behavior using `httpx.MockTransport`.
 - JSON extraction, Markdown fences, malformed/truncated/multiple objects,
@@ -1080,8 +1104,10 @@ Regression coverage includes:
 - Critic pass, repair, strict/non-strict failure, revision, and revision
   failure.
 - Pipeline outcomes, state transitions, sanitized trace, clarification,
-  refusal, degraded critic results.
+  refusal, degraded critic results, and understanding-failure clarification.
 - CLI text/JSON/stdin/trace/debug/LLM I/O diagnostics.
+- Client lifecycle close behavior for routed clients, mock/scripted clients,
+  and CLI success/error paths.
 - Scripted example commands.
 - Optional live run.
 
@@ -1095,12 +1121,13 @@ Known test gaps:
 
 ## 18. Current roadmap status
 
-Phase 0 - MVP baseline: implemented but not hardened beyond current tests and
-documentation. The code implements the single-request orchestration baseline,
-CLI, mock/scripted clients, OpenAI-compatible provider, structured validation,
-clarification gate, strategy registry, worker generation, critic, one revision,
-final response, and in-memory trace. Relevant files include `pipeline/runner.py`,
-`stages/*.py`, `clients/*.py`, and `cli.py`.
+Phase 0 - MVP baseline: implemented. The code implements the single-request
+orchestration baseline, CLI, mock/scripted clients, OpenAI-compatible provider,
+structured validation, clarification gate, strategy registry, worker
+generation, critic, one revision, final response, in-memory trace, explicit
+LLM I/O diagnostics, client lifecycle cleanup, and current MVP secret
+redaction. Relevant files include `pipeline/runner.py`, `stages/*.py`,
+`clients/*.py`, `redaction.py`, and `cli.py`.
 
 Phase 1 - Multi-model orchestration: partially implemented. Completed:
 logical roles can map to different named models and providers through
@@ -1188,14 +1215,6 @@ rate limiting, graceful shutdown, backups, or load tests exist.
   Likely roadmap phase: Phase 2 or hardening.
   Blocks later work: does not block but may reduce structured-output reliability.
 
-- Component: trace configuration.
-  Impact: `include_prompt_summaries`, `include_full_prompts`, and
-  `redact_user_content` are accepted but not fully implemented as distinct
-  trace rendering policies.
-  File/symbol: `TraceConfig`, `_include_trace`, `TraceCollector`.
-  Likely roadmap phase: Phase 4.
-  Blocks later work: affects observability design.
-
 - Component: pipeline persistence.
   Impact: cannot inspect, resume, or reproduce tasks after process exit.
   File/symbol: `PipelineRunner`, `TraceCollector`.
@@ -1207,13 +1226,6 @@ rate limiting, graceful shutdown, backups, or load tests exist.
   File/symbol: `PipelineRunner.run`, `OpenAICompatibleModelClient.generate`.
   Likely roadmap phase: Phase 7.
   Blocks later work: blocks service queue/cancel endpoints.
-
-- Component: provider lifecycle.
-  Impact: clients expose `close()` only on `OpenAICompatibleModelClient`; the
-  factory/runner do not manage closing routed HTTP clients.
-  File/symbol: `OpenAICompatibleModelClient.close`, `RoutedModelClient`.
-  Likely roadmap phase: Phase 1 or 13.
-  Blocks later work: relevant for long-running service mode.
 
 - Component: final response usage accounting.
   Impact: token usage is parsed but not aggregated in `FinalResponse`.

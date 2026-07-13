@@ -72,10 +72,14 @@ Sequence:
 2. if invalid and repair budget is one, call understanding role with repair prompt;
 3. parse and validate repaired response;
 4. if still invalid:
-   - `understanding_failure_mode=error`: stop with structured failure;
-   - `understanding_failure_mode=safe_fallback`: create deterministic fallback, add warning, continue.
+   - `understanding_failure_mode=clarify`: return
+     `FinalResponse(status=clarification_required)` with a concise request for
+     the user to restate the goal, constraints, and desired output format.
 
 No third attempt.
+
+Default behavior does not call the worker, critic, or revision stage after an
+understanding structured-output failure.
 
 ## 7. Execution-plan policy failure
 
@@ -88,7 +92,6 @@ When a valid schema violates deterministic policy:
 
 Examples of safe corrections:
 
-- force a configured role;
 - force critic on for high-stakes output;
 - replace an incompatible output mode with caller override;
 - cap list lengths or revision counts.

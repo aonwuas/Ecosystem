@@ -5,10 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from prompt_orchestrator.clients import ModelClient
-from prompt_orchestrator.config.models import (
-    PromptOrchestratorConfig,
-    UnderstandingFailureMode,
-)
+from prompt_orchestrator.config.models import PromptOrchestratorConfig
 from prompt_orchestrator.domain import (
     ClarificationDecision,
     ExecutionPlan,
@@ -96,7 +93,6 @@ def run_understanding_stage(
             status="ok",
             details={
                 "strategy": policy.validated_plan.plan.strategy.value,
-                "worker_role": policy.validated_plan.plan.worker_role.value,
             },
         )
         trace.add_event(
@@ -148,7 +144,6 @@ def run_understanding_stage(
                     attempt=budget.attempts_used + 1,
                     details={
                         "strategy": policy.validated_plan.plan.strategy.value,
-                        "worker_role": policy.validated_plan.plan.worker_role.value,
                     },
                 )
                 trace.add_event(
@@ -269,7 +264,7 @@ def _render_understanding_prompt(
     requested_mode = (
         intake.request.requested_output_mode.value
         if intake.request.requested_output_mode is not None
-        else "none"
+        else config.runtime.default_output_mode.value
     )
     return render_template(
         load_template("understanding.md"),
@@ -278,7 +273,6 @@ def _render_understanding_prompt(
             "caller_context": intake.normalized_context or "",
             "requested_output_mode": requested_mode,
             "strategy_registry": strategy_registry_summary(),
-            "available_roles": ", ".join(role.value for role in ModelRole),
             "execution_plan_schema": execution_plan_schema_contract(),
             "clarification_policy": _clarification_policy_summary(),
         },
@@ -327,15 +321,15 @@ def _handle_understanding_failure(
     trace: TraceCollector,
     error: StructuredOutputError,
 ) -> UnderstandingStageResult:
-    if config.runtime.understanding_failure_mode is UnderstandingFailureMode.ERROR:
-        raise error
-
-    fallback_plan = _safe_fallback_plan(intake.request)
+    fallback_plan = _clarification_failure_plan(
+        request=intake.request,
+        default_output_mode=config.runtime.default_output_mode,
+    )
     trace.add_event(
         stage="understanding",
-        event="safe_fallback",
+        event="clarification_required",
         status="warning",
-        warning_code="UNDERSTANDING_SAFE_FALLBACK",
+        warning_code="UNDERSTANDING_CLARIFICATION_REQUIRED",
         details={"strategy": fallback_plan.strategy.value},
     )
     policy = evaluate_execution_plan_policy(
@@ -351,44 +345,52 @@ def _handle_understanding_failure(
     )
 
 
-def _safe_fallback_plan(request: PromptRequest) -> ExecutionPlan:
-    strategy = (
-        StrategyId.STRUCTURED_ANALYSIS
-        if request.requested_output_mode is OutputMode.JSON
-        else StrategyId.DIRECT_ANSWER
-    )
+def _clarification_failure_plan(
+    *,
+    request: PromptRequest,
+    default_output_mode: OutputMode,
+) -> ExecutionPlan:
     return ExecutionPlan(
         schema_version=1,
         understanding=TaskUnderstanding(
-            user_goal="Respond helpfully to the literal prompt.",
-            intent="general assistance",
-            task_type="general",
-            complexity=TaskComplexity.MODERATE,
-            ambiguity=AmbiguityLevel.MEDIUM,
-            risk_level=RiskLevel.LOW,
+            user_goal="Clarify the user's request before answering.",
+            intent="request clarification",
+            task_type="clarification",
+            complexity=TaskComplexity.HIGH_STAKES,
+            ambiguity=AmbiguityLevel.HIGH,
+            risk_level=RiskLevel.HIGH,
             risk_categories=[],
-            missing_information=[],
+            missing_information=[
+                "The understanding model output could not be validated."
+            ],
             assumptions=["The understanding model output could not be validated."],
-            uncertainties=["Nuanced intent may not have been captured."],
-            concise_rationale="A generic fallback is used after validation failure.",
+            uncertainties=[
+                "The user's intent, constraints, and output format are unknown."
+            ],
+            concise_rationale=(
+                "Understanding failed, so the safe response is clarification."
+            ),
         ),
         clarification=ClarificationDecision(
-            action=ClarificationAction.PROCEED,
-            question=None,
-            reason="The literal prompt can still receive a general answer.",
+            action=ClarificationAction.ASK_CLARIFICATION,
+            question=(
+                "I couldn't confidently interpret the request. Please restate what "
+                "you want help with, including the goal, important constraints, "
+                "and desired output format."
+            ),
+            reason="The request could not be confidently interpreted.",
         ),
-        strategy=strategy,
-        worker_role=ModelRole.WORKER,
+        strategy=StrategyId.STRUCTURED_ANALYSIS,
         output_contract=OutputContract(
-            mode=request.requested_output_mode or OutputMode.TEXT,
-            structure="direct helpful answer",
-            tone="clear and cautious",
-            length="medium",
+            mode=request.requested_output_mode or default_output_mode,
+            structure="single clarification request",
+            tone="clear and concise",
+            length="short",
             audience="general user",
         ),
-        must_include=["State that assumptions may be limited."],
-        must_avoid=["Pretending nuanced intent was fully understood."],
-        quality_criteria=["Respond to the literal prompt.", "State assumptions."],
+        must_include=["Ask the user to restate their goal, constraints, and format."],
+        must_avoid=["Proceeding as though the request was understood."],
+        quality_criteria=["Require clarification before generation."],
         critic_required=True,
     )
 

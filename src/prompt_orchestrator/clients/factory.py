@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
 import yaml  # type: ignore[import-untyped]
 
@@ -55,10 +57,38 @@ class RoutedModelClient:
 
     def __init__(self, clients: dict[ModelRole, ModelClient]) -> None:
         self._clients = clients
+        self._closed = False
 
     def generate(self, request: ModelRequest) -> ModelResponse:
         """Generate with the role-specific client."""
         return self._clients[request.role].generate(request)
+
+    def close(self) -> None:
+        """Close every unique underlying role client once."""
+        if self._closed:
+            return
+        self._closed = True
+        seen: set[int] = set()
+        for client in self._clients.values():
+            marker = id(client)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            client.close()
+
+    async def aclose(self) -> None:
+        self.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 def create_pipeline_client(config: PromptOrchestratorConfig) -> ModelClient:
