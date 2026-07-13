@@ -14,6 +14,8 @@ SPECIFICATION_DOCUMENTS = [
     "PROJECT_DECISIONS.md",
     "MVP.md",
     "ARCHITECTURE.md",
+    "ROADMAP.md",
+    "PROJECT_STATE.md",
     "DATA_MODELS.md",
     "CONFIGURATION.md",
     "PROMPT_CONTRACTS.md",

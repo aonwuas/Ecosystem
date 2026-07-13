@@ -2,6 +2,12 @@
 
 Implement checkpoints in order. Each checkpoint includes prerequisites, required work, acceptance criteria, and explicit exclusions.
 
+These checkpoints are the historical MVP implementation record. For post-MVP
+roadmap work, generate implementation plans from `ROADMAP.md`, the current
+`PROJECT_STATE.md`, and the selected roadmap phase. If future-work notes in
+this file conflict with `ROADMAP.md`, treat `ROADMAP.md` as authoritative for
+post-MVP direction.
+
 ## Milestone 1 — Repository scaffold and developer tooling
 
 ### Goal

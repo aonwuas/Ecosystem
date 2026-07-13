@@ -112,3 +112,11 @@ The MVP returns a clarification question and stops. It does not maintain a persi
 ## Scope exclusions
 
 No RAG, tools, memory, database, service API, web UI, or multi-user support in the MVP.
+
+## Planning and implementation-state handoff
+
+- `PROJECT_STATE.md` is the canonical implementation-context handoff for
+  planners and future coding agents.
+- `ROADMAP.md` is the canonical future-feature roadmap.
+- These documents must remain separate because planned behavior and implemented
+  behavior must not be conflated.

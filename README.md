@@ -66,6 +66,9 @@ The MVP does **not** include:
 The repository is governed by the following documents:
 
 - [`AGENTS.md`](AGENTS.md): mandatory rules for Codex and other coding agents.
+- [`ROADMAP.md`](ROADMAP.md): future product phases and intended direction.
+- [`PROJECT_STATE.md`](PROJECT_STATE.md): current implementation-grounded
+  repository state.
 - [`MVP.md`](MVP.md): product scope and acceptance criteria.
 - [`PROJECT_DECISIONS.md`](PROJECT_DECISIONS.md): fixed implementation decisions for the MVP.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): system boundaries and component interactions.
@@ -80,6 +83,17 @@ The repository is governed by the following documents:
 - [`CODEX_INSTRUCTIONS.md`](CODEX_INSTRUCTIONS.md): copy-ready Codex prompts for every milestone.
 
 When documents appear to conflict, use the precedence order in `AGENTS.md`.
+
+## Planning and project status
+
+Use [`ROADMAP.md`](ROADMAP.md) for future direction and phase definitions. Use
+[`PROJECT_STATE.md`](PROJECT_STATE.md) for the implementation that actually
+exists today, including modules, schemas, commands, tests, and known gaps.
+[`CHECKPOINTS.md`](CHECKPOINTS.md) remains the historical MVP milestone record.
+
+Planners should read `ROADMAP.md` and `PROJECT_STATE.md` together before
+proposing roadmap work so planned capabilities are not confused with current
+behavior.
 
 ## Installation
 

@@ -104,3 +104,21 @@ Library modules use Python logging. Default CLI operation should remain quiet ex
 ## 9. Versioning
 
 The MVP begins at an unreleased `0.1.0` development version. Do not publish packages as part of the MVP milestones unless explicitly instructed.
+
+## 10. Documentation update checklist
+
+Review and update `PROJECT_STATE.md` whenever a change affects:
+
+- architecture or module responsibilities;
+- configuration keys, defaults, validation, or examples;
+- public schemas, enums, dataclasses, or serialized JSON output;
+- prompt templates, prompt contracts, or repair prompts;
+- pipeline stages, state transitions, retries, fallback behavior, or
+  finalization;
+- CLI commands, command options, exit codes, JSON output, or future API
+  interfaces;
+- test commands, quality gates, or live-test behavior;
+- roadmap completion status or known implementation limitations.
+
+Documentation updates should cite exact file paths and symbols, describe only
+implemented behavior as implemented, and avoid rewriting unrelated sections.

@@ -156,3 +156,15 @@ encourage meaningless tests.
 - Do not test implementation-private wording when behavior is the requirement.
 - Do not disable validation to simplify fixtures.
 - Do not delete tests to accommodate implementation drift.
+
+## 10. Documentation consistency at completion
+
+Milestone and roadmap-phase completion must include a documentation review.
+Update `PROJECT_STATE.md` when implementation changes affect architecture,
+configuration, schemas, prompts, pipeline flow, error behavior, public
+interfaces, test commands, or roadmap status.
+
+Do not add brittle tests that compare all documentation prose to source code.
+Where practical, prefer lightweight tests for documented public commands,
+configuration examples, public schemas, or prompt contracts, and use a review
+checklist for broader documentation consistency.

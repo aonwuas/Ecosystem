@@ -16,8 +16,10 @@ When requirements conflict, use this order:
 8. `PROMPT_CONTRACTS.md`.
 9. `ERROR_HANDLING.md` and `SECURITY.md`.
 10. `TESTING.md` and `DEVELOPMENT.md`.
-11. `CHECKPOINTS.md`.
-12. Existing implementation details.
+11. `ROADMAP.md`.
+12. `PROJECT_STATE.md`.
+13. `CHECKPOINTS.md`.
+14. Existing implementation details.
 
 Do not silently resolve a genuine conflict by inventing a new product direction. Record the conflict in the milestone report if it cannot be resolved using this precedence.
 
@@ -137,6 +139,16 @@ Do not replace these with a framework without an explicit requirement change.
 - Update `DATA_MODELS.md` when public schemas or enums change.
 - Update `PROMPT_CONTRACTS.md` when a model-call contract changes.
 - Do not mark unimplemented behavior as complete.
+- Codex must read `ROADMAP.md` and `PROJECT_STATE.md` before planning or
+  implementing roadmap work.
+- Any milestone that changes architecture, configuration, schemas, prompts,
+  public interfaces, pipeline flow, error behavior, or test commands must
+  update `PROJECT_STATE.md` in the same change.
+- A milestone is not complete while `PROJECT_STATE.md` is materially
+  inaccurate.
+- Implementation-grounded details must include exact paths and symbols.
+- Planned functionality must not be described as implemented.
+- Do not rewrite unrelated documentation sections unnecessarily.
 
 ## 11. Dependency policy
 
