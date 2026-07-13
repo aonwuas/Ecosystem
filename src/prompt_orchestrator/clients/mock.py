@@ -14,8 +14,14 @@ from prompt_orchestrator.exceptions import ProviderError
 class MockModelClient:
     """Return a fixed response and record provider-neutral requests."""
 
-    def __init__(self, text: str = "Mock response") -> None:
+    def __init__(
+        self,
+        text: str = "Mock response",
+        *,
+        usage: TokenUsage | None = None,
+    ) -> None:
         self.text = text
+        self._usage = usage or TokenUsage()
         self.requests: list[ModelRequest] = []
         self.close_count = 0
         self._closed = False
@@ -26,7 +32,7 @@ class MockModelClient:
             text=self.text,
             model=request.model_name,
             finish_reason="stop",
-            usage=TokenUsage(),
+            usage=self._usage,
             provider_metadata={"provider": "mock"},
         )
 
@@ -60,6 +66,9 @@ class ScriptedResponse:
     error: ProviderError | None = None
     model: str | None = None
     finish_reason: str = "stop"
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 class ScriptedModelClient:
@@ -97,7 +106,11 @@ class ScriptedModelClient:
             text=step.text,
             model=step.model or request.model_name,
             finish_reason=step.finish_reason,
-            usage=TokenUsage(),
+            usage=TokenUsage(
+                input_tokens=step.input_tokens,
+                output_tokens=step.output_tokens,
+                total_tokens=step.total_tokens,
+            ),
             provider_metadata={"provider": "scripted"},
         )
 
@@ -146,4 +159,17 @@ class ScriptedModelClient:
             error=error,
             model=model,
             finish_reason=finish_reason,
+            input_tokens=_optional_token(step.get("input_tokens")),
+            output_tokens=_optional_token(step.get("output_tokens")),
+            total_tokens=_optional_token(step.get("total_tokens")),
         )
+
+
+def _optional_token(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("scripted token counts must be integers")
+    if value < 0:
+        raise ValueError("scripted token counts must be non-negative")
+    return value

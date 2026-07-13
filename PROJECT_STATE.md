@@ -1156,9 +1156,17 @@ Phase 4 - Persistent task state and observability: not started. No
 inspect/resume/events CLI, persistence schema, or migration policy exists.
 Current trace is in-memory only.
 
-Phase 5 - Evaluation and regression framework: not started. There is a normal
-pytest suite and optional live smoke test, but no evaluation corpus, evaluator
-CLI, model judging, reports, baseline comparison, or evaluation-set versioning.
+Phase 5 - Evaluation and regression framework: partially implemented.
+Completed: an evaluation package (`src/prompt_orchestrator/evaluation/`) with a
+YAML corpus loader and `EvalCase`/`EvalChecks` schema, deterministic model-free
+checks (`must_include`, `must_avoid`, length, expected status), an orchestrated
+vs single-call baseline comparison, per-arm token/latency cost accounting via
+`MeteringModelClient`, an opt-in pairwise model judge, an `EvalReport`, and a
+`prompt-orchestrator eval` CLI command (`--corpus`, `--judge`, `--no-baseline`,
+`--json`). Missing: rubric-scored regressions by category over time,
+baseline-run comparison beyond single-call, evaluation-set versioning and report
+persistence, latency-tier and local-vs-hosted comparisons, and prompt-template
+version tracking in reports.
 
 Phase 6 - Coding-harness planning and review mode: not started. No
 `coding-plan`, `coding-review`, or `coding-repair` CLI commands or coding-plan
@@ -1228,10 +1236,13 @@ rate limiting, graceful shutdown, backups, or load tests exist.
   Blocks later work: blocks service queue/cancel endpoints.
 
 - Component: final response usage accounting.
-  Impact: token usage is parsed but not aggregated in `FinalResponse`.
-  File/symbol: `TokenUsage`, `DraftResponse`, `FinalResponse`.
+  Status: addressed. `MeteringModelClient` aggregates per-call token usage and
+  latency into `RunUsage`; `run` attaches it to `FinalResponse.usage` (shown in
+  `--json`, and under `--trace` in text mode) and the evaluation harness records
+  it per arm. Remaining: usage is captured at the client boundary rather than
+  inside each stage result, and provider cost/pricing is not modeled.
+  File/symbol: `clients/metering.py`, `domain/usage.py`, `FinalResponse.usage`.
   Likely roadmap phase: Phase 4 or 5.
-  Blocks later work: affects observability/evaluation reports.
 
 - Component: user metadata.
   Impact: `PromptRequest.metadata` exists but is not injected into prompts or

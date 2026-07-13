@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTED_CONFIG = "examples/config.scripted.yaml"
+EVAL_CONFIG = "examples/config.eval-scripted.yaml"
+EVAL_CORPUS = "examples/eval-corpus.yaml"
 
 
 def cli(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -53,6 +55,27 @@ def test_scripted_example_understand_plan_and_run() -> None:
     assert payload["status"] == "completed"
     assert "SQLite" in payload["text"]
     assert "PostgreSQL" in payload["text"]
+
+
+def test_scripted_eval_example_reports_cost_premium() -> None:
+    result = cli(
+        "eval",
+        "--config",
+        EVAL_CONFIG,
+        "--corpus",
+        EVAL_CORPUS,
+        "--json",
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["case_count"] == 2
+    assert report["orchestrated_passes"] == 2
+    assert report["baseline_passes"] == 2
+    # Orchestration runs three model calls per case; the baseline runs one.
+    assert report["orchestrated_calls"] == 6
+    assert report["baseline_calls"] == 2
+    assert report["orchestrated_total_tokens"] > report["baseline_total_tokens"]
 
 
 def test_scripted_example_stdin_and_trace() -> None:

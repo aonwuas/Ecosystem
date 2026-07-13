@@ -22,6 +22,7 @@ from prompt_orchestrator.domain.enums import (
 from prompt_orchestrator.domain.execution_plan import OutputContract
 from prompt_orchestrator.domain.model_io import TokenUsage
 from prompt_orchestrator.domain.trace import Trace
+from prompt_orchestrator.domain.usage import RunUsage
 
 
 class PromptPlan(DomainModel):
@@ -113,6 +114,7 @@ class FinalResponse(DomainModel):
     revision_performed: bool = Field(strict=True)
     used_safe_fallback: bool = Field(strict=True)
     trace: Trace | None = None
+    usage: RunUsage | None = None
 
     @model_validator(mode="after")
     def validate_final_shape(self) -> Self:

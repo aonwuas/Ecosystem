@@ -39,6 +39,25 @@ Bash:
 cat examples/request.txt | python -m prompt_orchestrator run --config examples/config.scripted.yaml --stdin
 ```
 
+## Evaluation (orchestrated vs single-call baseline)
+
+`examples/config.eval-scripted.yaml` and `examples/eval-corpus.yaml` run the
+evaluation harness with no network. Each case runs through the full pipeline and
+through a single-call baseline on the same worker model, with token and latency
+cost accounted for each arm:
+
+```bash
+python -m prompt_orchestrator eval --config examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml
+python -m prompt_orchestrator eval --config examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml --json
+python -m prompt_orchestrator eval --config examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml --no-baseline
+```
+
+Deterministic checks (`must_include`, `must_avoid`, length, expected status) run
+without a model. The optional pairwise model judge (`--judge`) needs a capable
+critic model and is not exercised by the scripted example. The scripted fixture
+includes illustrative token counts so the report shows a concrete
+orchestrated-vs-baseline cost premium.
+
 ## Local Llama-Server Config
 
 `examples/config.local-llama.yaml` maps all four roles to one

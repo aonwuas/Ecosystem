@@ -11,14 +11,20 @@ from pathlib import Path
 from prompt_orchestrator import __version__
 from prompt_orchestrator.clients import (
     DiagnosticModelClient,
+    MeteringModelClient,
     ModelClient,
     create_pipeline_client,
 )
 from prompt_orchestrator.config import load_config, summarize_config
 from prompt_orchestrator.config.models import PromptOrchestratorConfig
-from prompt_orchestrator.domain import PromptRequest
+from prompt_orchestrator.domain import PromptRequest, RunUsage
 from prompt_orchestrator.domain.enums import OutputMode
 from prompt_orchestrator.domain.trace import Trace
+from prompt_orchestrator.evaluation import (
+    load_corpus,
+    render_report_text,
+    run_evaluation,
+)
 from prompt_orchestrator.exceptions import (
     ConfigurationError,
     InputError,
@@ -76,6 +82,39 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser = subparsers.add_parser(command, help=help_text)
         _add_runtime_arguments(command_parser)
         command_parser.set_defaults(handler=_handler_for(command))
+
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Compare orchestrated output against a single-call baseline.",
+    )
+    eval_parser.add_argument(
+        "--corpus",
+        required=True,
+        help="Path to an evaluation corpus YAML file or directory.",
+    )
+    eval_parser.add_argument("--config", help="Path to a YAML configuration file.")
+    eval_parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="Also run a pairwise model judge (requires a capable critic model).",
+    )
+    eval_parser.add_argument(
+        "--no-baseline",
+        dest="baseline",
+        action="store_false",
+        help="Skip the single-call baseline arm.",
+    )
+    eval_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Render structured JSON.",
+    )
+    eval_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show stack traces for unexpected internal errors.",
+    )
+    eval_parser.set_defaults(handler=_handle_eval, baseline=True)
 
     return parser
 
@@ -215,24 +254,50 @@ def _handle_run(args: argparse.Namespace) -> int:
     recorder = _llm_io_recorder(args)
     token = set_current_llm_io_recorder(recorder)
     include_trace = _include_trace(args, config)
-    client = _pipeline_client(config, recorder)
+    client = MeteringModelClient(
+        _pipeline_client(config, recorder),
+        config=config,
+    )
     try:
         runner = PipelineRunner(config=config, client=client)
         result = runner.run(
             _prompt_request_from_args(args), include_trace=include_trace
         )
-        response = result.final_response
+        response = result.final_response.model_copy(update={"usage": client.snapshot()})
         if args.json:
             print(render_json(response))
         else:
             print(render_final_text(response))
             if include_trace and response.trace is not None:
                 print(_render_trace_text(response.trace))
+                if response.usage is not None:
+                    print(_render_usage_text(response.usage))
         return _status_exit_code(response.status.value)
     finally:
         client.close()
         reset_current_llm_io_recorder(token)
         _emit_llm_io(args, recorder)
+
+
+def _handle_eval(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    corpus = load_corpus(args.corpus)
+    client = _pipeline_client(config, None)
+    try:
+        report = run_evaluation(
+            corpus=corpus,
+            config=config,
+            client=client,
+            compare_baseline=args.baseline,
+            judge=args.judge,
+        )
+    finally:
+        client.close()
+    if args.json:
+        print(render_json(report))
+    else:
+        print(render_report_text(report))
+    return 0
 
 
 def _prompt_request_from_args(args: argparse.Namespace) -> PromptRequest:
@@ -313,6 +378,16 @@ def _render_trace_text(trace: Trace) -> str:
             f"({event.duration_ms:.1f} ms)"
         )
     return "\n".join(lines)
+
+
+def _render_usage_text(usage: RunUsage) -> str:
+    tokens = "?" if usage.total_tokens is None else str(usage.total_tokens)
+    return (
+        "\nCost:\n"
+        f"- calls: {usage.call_count}\n"
+        f"- total tokens: {tokens}\n"
+        f"- total time: {usage.total_duration_ms:.0f} ms"
+    )
 
 
 def _error_payload(exc: PromptOrchestratorError) -> dict[str, object]:

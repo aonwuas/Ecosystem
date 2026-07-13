@@ -1,0 +1,32 @@
+version: 1
+
+providers:
+  scripted:
+    type: mock
+    fixture_path: examples/eval-scripted.yaml
+
+models:
+  scripted_general:
+    provider: scripted
+    model: scripted-model
+    temperature: 0.1
+    max_output_tokens: 3000
+    timeout_seconds: 120
+
+roles:
+  understanding: scripted_general
+  worker: scripted_general
+  critic: scripted_general
+  revision: scripted_general
+
+runtime:
+  structured_output_repair_attempts: 1
+  transient_http_retries: 0
+  enable_critic: true
+  strict_critic: false
+  enable_revision: true
+  max_revision_attempts: 1
+  understanding_failure_mode: clarify
+  default_output_mode: text
+  trace:
+    enabled_by_default: false

@@ -1,0 +1,154 @@
+# Scripted responses for the deterministic evaluation example.
+#
+# Order matters. For each corpus case the harness issues the orchestrated calls
+# (understanding, worker, critic) and then one baseline call. Token counts are
+# illustrative so the report shows a concrete orchestrated-vs-baseline cost
+# premium. The judge arm is not scripted here; use --judge with a live model.
+
+# --- Case 1: db-choice (orchestrated) ---
+- expect: understanding
+  input_tokens: 320
+  output_tokens: 210
+  total_tokens: 530
+  respond_json:
+    schema_version: 1
+    understanding:
+      user_goal: Choose the more appropriate database for a small application.
+      intent: decision support
+      task_type: comparison
+      complexity: moderate
+      ambiguity: medium
+      risk_level: low
+      risk_categories: []
+      missing_information:
+        - expected concurrency
+      assumptions:
+        - The application starts small.
+      uncertainties:
+        - Future write concurrency is not specified.
+      concise_rationale: The user needs a conditional technical comparison.
+    clarification:
+      action: proceed
+      question: null
+      reason: A useful comparison can proceed with explicit assumptions.
+    strategy: comparison
+    output_contract:
+      mode: markdown
+      structure: comparison with recommendation
+      tone: practical
+      length: medium
+      audience: software developer
+    must_include:
+      - tradeoffs
+      - conditional recommendation
+    must_avoid:
+      - pretending future scale is known
+    quality_criteria:
+      - State assumptions.
+      - Compare operational complexity.
+      - Give a conditional recommendation.
+    critic_required: true
+- expect: worker
+  input_tokens: 420
+  output_tokens: 300
+  total_tokens: 720
+  respond_text: |
+    Assumption: the application starts small and future write concurrency is
+    uncertain.
+
+    SQLite is a good default when the app is single-process, low-concurrency, or
+    still validating the product: it is zero-administration and embedded.
+    PostgreSQL is the better choice when you expect concurrent writes, multiple
+    application servers, managed backups, or richer operational controls.
+
+    Conditional recommendation: begin with SQLite only if a later migration is
+    cheap; otherwise choose PostgreSQL early to avoid a disruptive move.
+- expect: critic
+  input_tokens: 360
+  output_tokens: 80
+  total_tokens: 440
+  respond_json:
+    schema_version: 1
+    passes: true
+    issues: []
+    violated_criteria: []
+    revision_recommended: false
+    revision_instruction: null
+    concise_summary: The draft satisfies the plan and states its assumptions.
+# --- Case 1: db-choice (baseline) ---
+- expect: baseline
+  input_tokens: 60
+  output_tokens: 250
+  total_tokens: 310
+  respond_text: |
+    SQLite is simpler to run and good for small apps; PostgreSQL scales better
+    for concurrent writes and larger deployments. Pick SQLite to start and
+    PostgreSQL if you expect growth.
+
+# --- Case 2: unit-testing (orchestrated) ---
+- expect: understanding
+  input_tokens: 300
+  output_tokens: 190
+  total_tokens: 490
+  respond_json:
+    schema_version: 1
+    understanding:
+      user_goal: Understand the main benefits of unit testing for a team.
+      intent: explanation
+      task_type: summarization
+      complexity: simple
+      ambiguity: low
+      risk_level: low
+      risk_categories: []
+      missing_information: []
+      assumptions:
+        - The team writes application software.
+      uncertainties: []
+      concise_rationale: The user wants a concise benefit summary.
+    clarification:
+      action: proceed
+      question: null
+      reason: The request is clear enough to summarize directly.
+    strategy: summarization
+    output_contract:
+      mode: text
+      structure: short paragraph
+      tone: neutral
+      length: short
+      audience: software team
+    must_include:
+      - key benefits
+    must_avoid:
+      - unsupported claims
+    quality_criteria:
+      - Preserve key points.
+      - Do not add unsupported facts.
+    critic_required: true
+- expect: worker
+  input_tokens: 380
+  output_tokens: 220
+  total_tokens: 600
+  respond_text: |
+    Unit testing helps a team catch regressions early, document expected
+    behavior, and refactor with confidence. Fast, focused tests shorten
+    feedback loops and make defects cheaper to fix.
+- expect: critic
+  input_tokens: 340
+  output_tokens: 70
+  total_tokens: 410
+  respond_json:
+    schema_version: 1
+    passes: true
+    issues: []
+    violated_criteria: []
+    revision_recommended: false
+    revision_instruction: null
+    concise_summary: The summary preserves key points without adding facts.
+# --- Case 2: unit-testing (baseline) ---
+- expect: baseline
+  input_tokens: 55
+  output_tokens: 180
+  total_tokens: 235
+  respond_text: |
+    Unit testing catches bugs early, documents behavior, and makes refactoring
+    safer, which speeds up development over time.

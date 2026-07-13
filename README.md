@@ -44,6 +44,10 @@ The MVP can:
 - perform at most one revision pass;
 - return the final answer;
 - optionally expose a structured trace of the orchestration process;
+- account for per-call token usage and latency on every run;
+- evaluate orchestrated output against a single-call baseline over a corpus,
+  with deterministic checks, an optional model judge, and a token/latency cost
+  comparison;
 - support mock models for deterministic tests;
 - support OpenAI-compatible HTTP model endpoints through configuration.
 
@@ -125,6 +129,9 @@ prompt-orchestrator plan "Help me choose between SQLite and PostgreSQL"
 
 # Run the complete pipeline
 prompt-orchestrator run "Help me choose between SQLite and PostgreSQL"
+
+# Evaluate orchestration against a single-call baseline with cost accounting
+prompt-orchestrator eval --config config.yaml --corpus examples/eval-corpus.yaml
 
 # Read a long prompt from stdin
 cat request.txt | prompt-orchestrator run --stdin

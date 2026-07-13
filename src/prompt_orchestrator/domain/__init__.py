@@ -36,9 +36,11 @@ from prompt_orchestrator.domain.results import (
     RoleModelNames,
 )
 from prompt_orchestrator.domain.trace import Trace, TraceEvent
+from prompt_orchestrator.domain.usage import CallRecord, RunUsage
 
 __all__ = [
     "AmbiguityLevel",
+    "CallRecord",
     "ClarificationAction",
     "ClarificationDecision",
     "CriticIssue",
@@ -61,6 +63,7 @@ __all__ = [
     "QualityResult",
     "RiskLevel",
     "RoleModelNames",
+    "RunUsage",
     "StrategyId",
     "TaskComplexity",
     "TaskUnderstanding",

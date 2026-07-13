@@ -1,0 +1,26 @@
+# Minimal evaluation corpus for the orchestration thesis.
+#
+# Each case runs twice: once through the full orchestration pipeline and once
+# through a single-call baseline on the same worker model. Deterministic checks
+# run without any model; the optional model judge (--judge) needs a capable
+# critic model and is not exercised by the scripted example.
+cases:
+  - id: db-choice
+    category: comparison
+    prompt: Compare SQLite and PostgreSQL for a small application.
+    rubric: Prefer the answer that states assumptions and gives a conditional recommendation.
+    checks:
+      must_include:
+        - postgresql
+        - sqlite
+      must_avoid:
+        - as an ai language model
+      min_length: 80
+
+  - id: unit-testing
+    category: summarization
+    prompt: Summarize the main benefits of unit testing for a software team.
+    checks:
+      must_include:
+        - test
+      min_length: 40

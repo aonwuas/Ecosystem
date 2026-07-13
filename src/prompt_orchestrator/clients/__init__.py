@@ -8,12 +8,14 @@ from prompt_orchestrator.clients.factory import (
     create_client_for_role,
     create_pipeline_client,
 )
+from prompt_orchestrator.clients.metering import MeteringModelClient
 from prompt_orchestrator.clients.mock import MockModelClient, ScriptedModelClient
 from prompt_orchestrator.clients.openai_compatible import OpenAICompatibleModelClient
 
 __all__ = [
     "ClientFactory",
     "DiagnosticModelClient",
+    "MeteringModelClient",
     "MockModelClient",
     "ModelClient",
     "OpenAICompatibleModelClient",
