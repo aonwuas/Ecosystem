@@ -1,9 +1,10 @@
-"""Opt-in pairwise model judge for orchestrated-vs-baseline comparison.
+"""Opt-in pairwise model judge for treatment-vs-control comparison.
 
 The judge is the only part of evaluation that needs a capable model, so it is
-opt-in. It performs a pairwise comparison and, to reduce position bias, the two
-answers are assigned to slots A and B deterministically by case index; the raw
-slot winner is then mapped back to "orchestrated" or "baseline".
+opt-in. To reduce position bias it judges each pair in **both orders** (treatment
+as A then as B) and only declares a winner when both orders agree; a disagreement
+is reported as a tie with ``order_consistent=False``. The judge currently reuses
+the critic role model; using a distinct, stronger judge model is a later step.
 """
 
 from __future__ import annotations
@@ -14,11 +15,7 @@ from pydantic import Field
 
 from prompt_orchestrator.clients import ModelClient
 from prompt_orchestrator.config.models import PromptOrchestratorConfig
-from prompt_orchestrator.domain import (
-    FinalResponse,
-    ModelMessage,
-    ModelRequest,
-)
+from prompt_orchestrator.domain import FinalResponse, ModelMessage, ModelRequest
 from prompt_orchestrator.domain._base import DomainModel, ShortText
 from prompt_orchestrator.domain.enums import ModelRole, PipelineStatus
 from prompt_orchestrator.evaluation.corpus import EvalCase
@@ -28,7 +25,7 @@ from prompt_orchestrator.prompts import load_template, render_template
 
 JUDGE_VARIABLES = frozenset({"task", "answer_a", "answer_b", "rubric"})
 
-JudgeWinner = Literal["orchestrated", "baseline", "tie"]
+JudgeWinner = Literal["treatment", "control", "tie"]
 
 
 class JudgeResponse(DomainModel):
@@ -40,30 +37,65 @@ class JudgeResponse(DomainModel):
 
 
 class JudgeVerdict(DomainModel):
-    """Judge outcome mapped back to orchestrated vs baseline."""
+    """Judge outcome for one pair, mapped to treatment vs control."""
 
     winner: JudgeWinner
     confidence: int = Field(ge=1, le=5, strict=True)
     reason: ShortText
-    orchestrated_slot: Literal["a", "b"]
+    order_consistent: bool = Field(strict=True)
 
 
 def judge_pair(
     *,
     case: EvalCase,
-    case_index: int,
-    orchestrated: FinalResponse,
-    baseline: FinalResponse,
+    treatment: FinalResponse,
+    control: FinalResponse,
     config: PromptOrchestratorConfig,
     client: ModelClient,
 ) -> JudgeVerdict:
-    """Judge orchestrated vs baseline for one case using the critic role model."""
-    orchestrated_slot: Literal["a", "b"] = "a" if case_index % 2 == 0 else "b"
-    if orchestrated_slot == "a":
-        answer_a, answer_b = _answer_text(orchestrated), _answer_text(baseline)
-    else:
-        answer_a, answer_b = _answer_text(baseline), _answer_text(orchestrated)
+    """Judge treatment vs control in both orders and combine the verdicts."""
+    # Order 1: treatment is slot A. Order 2: treatment is slot B.
+    order1 = _judge_once(
+        case=case,
+        answer_a=_answer_text(treatment),
+        answer_b=_answer_text(control),
+        config=config,
+        client=client,
+    )
+    order2 = _judge_once(
+        case=case,
+        answer_a=_answer_text(control),
+        answer_b=_answer_text(treatment),
+        config=config,
+        client=client,
+    )
+    winner1 = _winner_from_slot(order1.winner, treatment_slot="a")
+    winner2 = _winner_from_slot(order2.winner, treatment_slot="b")
+    confidence = round((order1.confidence + order2.confidence) / 2)
 
+    if winner1 == winner2:
+        return JudgeVerdict(
+            winner=winner1,
+            confidence=confidence,
+            reason=order1.reason,
+            order_consistent=True,
+        )
+    return JudgeVerdict(
+        winner="tie",
+        confidence=confidence,
+        reason=f"order-dependent: {order1.reason}",
+        order_consistent=False,
+    )
+
+
+def _judge_once(
+    *,
+    case: EvalCase,
+    answer_a: str,
+    answer_b: str,
+    config: PromptOrchestratorConfig,
+    client: ModelClient,
+) -> JudgeResponse:
     prompt = render_template(
         load_template("judge.md"),
         {
@@ -95,28 +127,23 @@ def judge_pair(
             request_kind="judge",
         )
     )
-    parsed = validate_structured_output(response.text, JudgeResponse).value
-    return JudgeVerdict(
-        winner=_map_winner(parsed.winner, orchestrated_slot),
-        confidence=parsed.confidence,
-        reason=parsed.reason,
-        orchestrated_slot=orchestrated_slot,
-    )
+    return validate_structured_output(response.text, JudgeResponse).value
 
 
 # Errors the caller may choose to treat as a skipped judgement rather than fatal.
 JudgeError = (ProviderError, StructuredOutputError)
 
 
-def _map_winner(
+def _winner_from_slot(
     slot_winner: Literal["a", "b", "tie"],
-    orchestrated_slot: Literal["a", "b"],
+    *,
+    treatment_slot: Literal["a", "b"],
 ) -> JudgeWinner:
     if slot_winner == "tie":
         return "tie"
-    if slot_winner == orchestrated_slot:
-        return "orchestrated"
-    return "baseline"
+    if slot_winner == treatment_slot:
+        return "treatment"
+    return "control"
 
 
 def _answer_text(response: FinalResponse) -> str:

@@ -1158,15 +1158,21 @@ Current trace is in-memory only.
 
 Phase 5 - Evaluation and regression framework: partially implemented.
 Completed: an evaluation package (`src/prompt_orchestrator/evaluation/`) with a
-YAML corpus loader and `EvalCase`/`EvalChecks` schema, deterministic model-free
-checks (`must_include`, `must_avoid`, length, expected status), an orchestrated
-vs single-call baseline comparison, per-arm token/latency cost accounting via
-`MeteringModelClient`, an opt-in pairwise model judge, an `EvalReport`, and a
-`prompt-orchestrator eval` CLI command (`--corpus`, `--judge`, `--no-baseline`,
-`--json`). Missing: rubric-scored regressions by category over time,
-baseline-run comparison beyond single-call, evaluation-set versioning and report
-persistence, latency-tier and local-vs-hosted comparisons, and prompt-template
-version tracking in reports.
+YAML corpus loader and `EvalCase`/`EvalChecks` schema; deterministic model-free
+checks (`must_include`, `must_avoid`, length, expected status); a generalized
+N-arm harness (`arms.py`) that compares the orchestration treatment against
+control arms — single call, equal-compute best-of-N and self-refine, and
+no-critic / no-revision ablations (`PipelineRunner.run_best_of_n`,
+`run_self_refine`, `with_overrides`); per-arm token/latency cost accounting via
+`MeteringModelClient` with compute-ratio-vs-treatment and quality-per-1k-tokens;
+a dependency-free stats module (`stats.py`: Wilson interval, sign/binomial,
+McNemar, bootstrap, sample-size) surfaced in the report as pass-rate CIs and
+paired treatment-vs-control significance; an opt-in both-order pairwise model
+judge; an `EvalReport`; and a `prompt-orchestrator eval` CLI command (`--corpus`,
+`--arms`, `--best-of-n`, `--ablations`, `--judge`, `--json`). Missing: a
+dedicated third-party judge role (judge currently reuses the critic model),
+multi-trial variance with API seeds, reference/gold-answer metrics, category
+stratification over time, evaluation-set versioning, and report persistence.
 
 Phase 6 - Coding-harness planning and review mode: not started. No
 `coding-plan`, `coding-review`, or `coding-repair` CLI commands or coding-plan

@@ -13,6 +13,7 @@ from prompt_orchestrator.config.models import PromptOrchestratorConfig
 from prompt_orchestrator.domain import FinalResponse, PromptRequest, RunUsage
 from prompt_orchestrator.domain.enums import CriticStatus, PipelineStatus
 from prompt_orchestrator.evaluation import (
+    ArmSpec,
     EvalChecks,
     EvalCorpus,
     evaluate_checks,
@@ -255,22 +256,27 @@ def test_run_evaluation_compares_arms_with_cost() -> None:
         corpus=_one_case_corpus(),
         config=config(),
         client=client,
-        compare_baseline=True,
+        arm_spec=ArmSpec(controls=("single_call",)),
         judge=False,
     )
     assert report.case_count == 1
-    assert report.orchestrated_passes == 1
-    assert report.baseline_passes == 1
-    assert report.orchestrated_total_tokens == 1600
-    assert report.baseline_total_tokens == 300
-    assert report.token_cost_premium == pytest.approx(1600 / 300)
-    assert report.orchestrated_calls == 3
-    assert report.baseline_calls == 1
+    assert report.treatment == "orchestrated"
+    assert report.arms["orchestrated"].passes == 1
+    assert report.arms["single_call"].passes == 1
+    assert report.arms["orchestrated"].total_tokens == 1600
+    assert report.arms["single_call"].total_tokens == 300
+    assert report.arms["orchestrated"].calls == 3
+    assert report.arms["single_call"].calls == 1
+    # The single-call control's compute ratio vs treatment is visible for fairness.
+    assert report.arms["single_call"].compute_ratio_vs_treatment == pytest.approx(
+        300 / 1600
+    )
+    assert report.arms["orchestrated"].compute_ratio_vs_treatment is None
     case = report.cases[0]
-    assert isinstance(case.orchestrated.usage, RunUsage)
+    assert isinstance(case.arms["orchestrated"].usage, RunUsage)
 
 
-def test_run_evaluation_no_baseline() -> None:
+def test_run_evaluation_no_controls() -> None:
     client = ScriptedModelClient(
         [
             ScriptedResponse(expect="understanding", text=_plan_json()),
@@ -284,17 +290,22 @@ def test_run_evaluation_no_baseline() -> None:
         corpus=_one_case_corpus(),
         config=config(),
         client=client,
-        compare_baseline=False,
+        arm_spec=ArmSpec(controls=()),
         judge=False,
     )
-    assert report.baseline_passes is None
-    assert report.cases[0].baseline is None
+    assert list(report.arms) == ["orchestrated"]
+    assert report.comparisons == {}
     assert client.remaining == 0
 
 
-def test_run_evaluation_with_judge_maps_winner() -> None:
-    judge_json = json.dumps(
-        {"winner": "a", "confidence": 4, "reason": "Answer A is more complete."}
+def test_run_evaluation_with_judge_both_orders() -> None:
+    # Both orders must agree for a decisive winner. Treatment is slot A in order 1
+    # and slot B in order 2, so "a" then "b" both mean the treatment won.
+    judge_order1 = json.dumps(
+        {"winner": "a", "confidence": 4, "reason": "A is more complete."}
+    )
+    judge_order2 = json.dumps(
+        {"winner": "b", "confidence": 5, "reason": "B is more complete."}
     )
     client = ScriptedModelClient(
         [
@@ -304,19 +315,19 @@ def test_run_evaluation_with_judge_maps_winner() -> None:
             ),
             ScriptedResponse(expect="critic", text=_critic_pass_json()),
             ScriptedResponse(expect="baseline", text="PostgreSQL or SQLite, briefly."),
-            ScriptedResponse(expect="judge", text=judge_json),
+            ScriptedResponse(expect="judge", text=judge_order1),
+            ScriptedResponse(expect="judge", text=judge_order2),
         ]
     )
     report = run_evaluation(
         corpus=_one_case_corpus(),
         config=config(),
         client=client,
-        compare_baseline=True,
+        arm_spec=ArmSpec(controls=("single_call",)),
         judge=True,
     )
-    verdict = report.cases[0].judge
-    assert verdict is not None
-    # Case index 0 -> orchestrated is slot "a"; judge picked "a".
-    assert verdict.orchestrated_slot == "a"
-    assert verdict.winner == "orchestrated"
-    assert report.judge_orchestrated_wins == 1
+    verdict = report.cases[0].judgements["single_call"]
+    assert verdict.winner == "treatment"
+    assert verdict.order_consistent is True
+    assert report.comparisons["single_call"].judge_treatment_wins == 1
+    assert client.remaining == 0

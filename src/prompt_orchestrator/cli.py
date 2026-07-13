@@ -21,6 +21,7 @@ from prompt_orchestrator.domain import PromptRequest, RunUsage
 from prompt_orchestrator.domain.enums import OutputMode
 from prompt_orchestrator.domain.trace import Trace
 from prompt_orchestrator.evaluation import (
+    ArmSpec,
     load_corpus,
     render_report_text,
     run_evaluation,
@@ -94,15 +95,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_parser.add_argument("--config", help="Path to a YAML configuration file.")
     eval_parser.add_argument(
+        "--arms",
+        default="single_call",
+        help=(
+            "Comma-separated control arms to compare against orchestration. "
+            "Choose from: single_call, best_of_n, self_refine. Use 'none' for "
+            "no controls."
+        ),
+    )
+    eval_parser.add_argument(
+        "--best-of-n",
+        dest="best_of_n",
+        type=int,
+        default=3,
+        help="Candidate count for the best_of_n arm (default 3).",
+    )
+    eval_parser.add_argument(
+        "--ablations",
+        action="store_true",
+        help="Add no-critic and no-revision ablation arms.",
+    )
+    eval_parser.add_argument(
         "--judge",
         action="store_true",
         help="Also run a pairwise model judge (requires a capable critic model).",
-    )
-    eval_parser.add_argument(
-        "--no-baseline",
-        dest="baseline",
-        action="store_false",
-        help="Skip the single-call baseline arm.",
     )
     eval_parser.add_argument(
         "--json",
@@ -114,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show stack traces for unexpected internal errors.",
     )
-    eval_parser.set_defaults(handler=_handle_eval, baseline=True)
+    eval_parser.set_defaults(handler=_handle_eval)
 
     return parser
 
@@ -282,13 +298,18 @@ def _handle_run(args: argparse.Namespace) -> int:
 def _handle_eval(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     corpus = load_corpus(args.corpus)
+    arm_spec = ArmSpec(
+        controls=_parse_arms(args.arms),
+        best_of_n=args.best_of_n,
+        ablations=args.ablations,
+    )
     client = _pipeline_client(config, None)
     try:
         report = run_evaluation(
             corpus=corpus,
             config=config,
             client=client,
-            compare_baseline=args.baseline,
+            arm_spec=arm_spec,
             judge=args.judge,
         )
     finally:
@@ -298,6 +319,12 @@ def _handle_eval(args: argparse.Namespace) -> int:
     else:
         print(render_report_text(report))
     return 0
+
+
+def _parse_arms(raw: str) -> tuple[str, ...]:
+    if raw.strip().lower() in {"", "none"}:
+        return ()
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
 def _prompt_request_from_args(args: argparse.Namespace) -> PromptRequest:

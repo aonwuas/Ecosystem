@@ -243,3 +243,10 @@
   - No provider pricing model yet (tokens, not dollars), and no report
   persistence or cross-run regression tracking — natural next steps if you want
   this to become the continuous-eval backbone I recommended in the evaluation.
+  
+  ------------------------------------------
+  
+  What are good ways to test the efficacy of the staged orchestration output vs 
+  a single call?
+  
+  ------------------------------------------

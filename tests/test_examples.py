@@ -70,12 +70,17 @@ def test_scripted_eval_example_reports_cost_premium() -> None:
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert report["case_count"] == 2
-    assert report["orchestrated_passes"] == 2
-    assert report["baseline_passes"] == 2
-    # Orchestration runs three model calls per case; the baseline runs one.
-    assert report["orchestrated_calls"] == 6
-    assert report["baseline_calls"] == 2
-    assert report["orchestrated_total_tokens"] > report["baseline_total_tokens"]
+    assert report["arms"]["orchestrated"]["passes"] == 2
+    assert report["arms"]["single_call"]["passes"] == 2
+    # Orchestration runs three model calls per case; the single call runs one.
+    assert report["arms"]["orchestrated"]["calls"] == 6
+    assert report["arms"]["single_call"]["calls"] == 2
+    assert (
+        report["arms"]["orchestrated"]["total_tokens"]
+        > report["arms"]["single_call"]["total_tokens"]
+    )
+    # The single-call control's compute ratio vs orchestration is reported.
+    assert report["arms"]["single_call"]["compute_ratio_vs_treatment"] < 1.0
 
 
 def test_scripted_example_stdin_and_trace() -> None:

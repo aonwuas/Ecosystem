@@ -39,24 +39,32 @@ Bash:
 cat examples/request.txt | python -m prompt_orchestrator run --config examples/config.scripted.yaml --stdin
 ```
 
-## Evaluation (orchestrated vs single-call baseline)
+## Evaluation (orchestration vs fair controls)
 
 `examples/config.eval-scripted.yaml` and `examples/eval-corpus.yaml` run the
-evaluation harness with no network. Each case runs through the full pipeline and
-through a single-call baseline on the same worker model, with token and latency
-cost accounted for each arm:
+evaluation harness with no network. Each case runs through the full pipeline
+(the treatment) and through a single-call control on the same worker model, with
+token and latency cost accounted for each arm:
 
 ```bash
 python -m prompt_orchestrator eval --config examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml
 python -m prompt_orchestrator eval --config examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml --json
-python -m prompt_orchestrator eval --config examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml --no-baseline
+python -m prompt_orchestrator eval --config examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml --arms none
 ```
 
-Deterministic checks (`must_include`, `must_avoid`, length, expected status) run
-without a model. The optional pairwise model judge (`--judge`) needs a capable
-critic model and is not exercised by the scripted example. The scripted fixture
-includes illustrative token counts so the report shows a concrete
-orchestrated-vs-baseline cost premium.
+The report shows, per arm, the deterministic pass rate with a 95% Wilson
+confidence interval, the token/latency cost, the compute ratio versus the
+treatment, and quality-per-1k-tokens — so orchestration's quality can be weighed
+against its cost. Deterministic checks (`must_include`, `must_avoid`, length,
+expected status) run without a model.
+
+**Equal-compute controls** — `--arms best_of_n,self_refine` (with `--best-of-n N`)
+and `--ablations` — are the fairest test: they spend a comparable token budget a
+different way, so a win is attributable to structure, not spend. The scripted
+example only scripts the single-call control; running the other arms or the
+pairwise judge (`--judge`, which judges both orders) needs a live model or a
+matching scripted fixture (see `tests/test_cli_eval.py` for the exact call
+sequence per arm).
 
 ## Local Llama-Server Config
 
