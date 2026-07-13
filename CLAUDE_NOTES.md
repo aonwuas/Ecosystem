@@ -250,3 +250,542 @@
   a single call?
   
   ------------------------------------------
+  
+   Here is Claude's plan:
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Testing the efficacy of staged orchestration vs a single call
+
+ Context
+
+ The orchestration pipeline costs ~4–6× the tokens/latency of one model call
+ (the
+ scripted example measured 5.85× tokens). So the honest efficacy question is
+ not "does staged orchestration beat one naive call?" — it is "does it beat
+ the best thing you could do with the same compute budget?" A single call with
+ the same small model is a weak control; if orchestration only wins because it
+ spends more, the structure isn't what's helping.
+
+ The current harness (src/prompt_orchestrator/evaluation/) is a good base but
+ proves little on its own: it runs each case once, compares exactly two
+ arms (orchestrated vs one single call), reports raw counts (no confidence
+ intervals or significance), uses one judge = the critic model (self-preference
+ risk), and has no equal-compute controls. This plan lays out the methodology
+ and a phased extension, prioritizing equal-compute fair baselines per the
+ chosen
+ scope.
+
+ ---
+ Part A — Methodology (the answer)
+
+ A1. The measurement stack (weakest→strongest signal)
+
+ 1. Objective reference-free checks — already in checks.py (must_include,
+ must_avoid, length, expected status). Cheap, reproducible, great for
+ regression; weak as a "quality" measure. Extend with format/JSON-schema
+ validity and constraint-satisfaction counts.
+ 2. Reference-based metrics (where gold answers exist) — exact match, token-F1,
+ ROUGE (summarization), JSON-schema + field accuracy (extraction/structured
+ output), executable unit tests (code). Objective and strong, but needs
+ authored gold and doesn't fit open-ended/creative tasks. (Deprioritized by
+ the user; kept as a later phase.)
+ 3. LLM-as-judge, pairwise — already in judge.py. The workhorse for
+ open-ended quality. Only trustworthy with the bias controls in A3.
+ 4. Human evaluation — small blind preference set. Not for scoring everything;
+ its job is to calibrate the LLM judge (agreement / Cohen's κ).
+
+ A2. Fair baselines & controls — THE priority
+
+ Compare orchestration against alternatives that spend a matched token/latency
+ budget, so any win is attributable to structure, not spend:
+
+ - Single call, same model — the floor (already have run_baseline).
+ - Best-of-N sampling — draw N candidates from the worker model at temp>0 and
+ select one (with the critic model, mirroring orchestration's critic). Pick N
+ so
+ best-of-N's tokens ≈ orchestration's tokens. This is the toughest, most
+ important control: much of orchestration's benefit can be reproduced by simply
+ sampling more and selecting.
+ - Self-refine — single model, one context: generate → self-critique →
+ improve, with no separate plan/strategy/roles. Isolates "explicit staged
+ roles" from "just iterate once."
+ - Stronger-model-at-equal-cost — could the extra tokens instead buy a bigger
+ single model? Compare orchestrated-small vs single-large at matched $ or
+ latency.
+ - Ablations — understanding-only; worker+critic but no revision; etc. Reuses
+ existing runtime.enable_critic / enable_revision toggles to attribute the
+ lift to specific stages.
+
+ Compute matching must be measured, not assumed. Because MeteringModelClient
+ already records per-arm tokens/latency, the report can show the achieved
+ token/latency ratio between arms so a reviewer can see the comparison is fair
+ (and N can be tuned to hit parity).
+
+ A3. Judge integrity (needed to trust any pairwise arm comparison)
+
+ - Use a strong third-party judge model, never the worker or critic model
+ (avoids self-preference bias).
+ - Run both orders (A/B and B/A) and average; treat order-flips as ties.
+ (Current code only alternates the slot across cases — better than nothing, not
+ sufficient per-case.)
+ - Calibrate against the small human set (agreement/κ); report it.
+ - Self-consistency: run the judge twice; a high flip-rate means low-signal
+ verdicts.
+ - Force a rubric + written reason (already done).
+
+ A4. Statistical treatment (so results aren't anecdotal)
+
+ - Paired design (same prompts through every arm) → paired tests:
+   - Pass/fail: McNemar's test on the discordant pairs.
+   - Pairwise wins: sign / binomial test on non-ties; report win-rate with a
+ Wilson confidence interval.
+   - Continuous scores: Wilcoxon signed-rank or bootstrap CIs.
+ - Sample size / power: 2–8 cases prove nothing. Estimate the N needed to
+ detect a meaningful win-rate delta; report CIs so under-powered results are
+ visibly inconclusive.
+ - Variance / reproducibility: pass the API seed (OpenAI-compatible servers
+ support it via extra_body) at fixed temperature for determinism; OR run K
+ trials per arm at temp>0 and report mean ± CI plus pass-rate stability.
+ Orchestration may win on consistency even at equal mean quality.
+ - All of this is implementable with the stdlib only (statistics, math,
+ random) — no numpy/scipy needed (confirmed: deps are only
+ httpx/pydantic/yaml).
+
+ A5. Slicing & failure analysis (where, not just whether)
+
+ - Stratify by category / complexity / ambiguity / risk. Orchestration
+ typically helps on ambiguous, high-stakes, multi-constraint tasks and hurts
+ simple direct answers (over-engineering + latency). Aggregate numbers hide
+ this.
+ - Failure taxonomy per arm: hallucination, missed constraint, format
+ violation, wrong refusal, verbosity.
+ - Cost–quality Pareto: plot quality vs tokens/latency; is orchestration
+ Pareto-optimal, or dominated by best-of-N? Report quality-per-1k-tokens.
+
+ A6. Process integrity
+
+ - Fixed, versioned corpus + fixed seeds → reproducible regression tracking
+ across prompt/model/strategy changes.
+ - Pre-register the metric and decision rule (what win-rate/CI justifies the
+ cost) before running, to avoid cherry-picking.
+ - Keep a hold-out set so prompts/strategies aren't overfit to the eval.
+
+ ---
+ Part B — Phased implementation plan (prioritized)
+
+ Phase 1 — Equal-compute fair baselines (priority)
+
+ Generalize the two-arm harness into an N-arm design and add the control arms.
+
+ - New src/prompt_orchestrator/evaluation/arms.py — an Arm = {name, kind,
+ run(request, client) -> FinalResponse}. Built-in factories:
+   - orchestrated → PipelineRunner.run
+   - single_call → PipelineRunner.run_baseline (exists)
+   - best_of_n(n) → N single-call candidates + critic-model selection
+   - self_refine → generate + one in-context self-critique/revise
+   - ablation(enable_critic=…, enable_revision=…) → orchestrated run with
+ toggles
+ - pipeline/runner.py — add run_best_of_n, run_self_refine, and let
+ run honor per-arm critic/revision overrides (reuse existing
+ RuntimeConfig.enable_critic/enable_revision semantics; pass a small override
+ rather than mutating frozen config). New request_kinds: candidate,
+ selection, self_refine_draft, self_refine_revise (so the scripted client
+ and metering can distinguish them).
+ - evaluation/harness.py — iterate a list of arms per case; designate one
+ treatment (orchestrated) and the rest controls; meter each arm via the
+ existing MeteringModelClient.reset()/snapshot(); pairwise-judge treatment vs
+ each control.
+ - evaluation/report.py — replace hardcoded orchestrated_*/baseline_*
+ with a per-arm results map; add a compute-match ratio per control
+ (control tokens ÷ treatment tokens) and quality-per-1k-tokens so fairness is
+ visible. Keep token_cost_premium behavior for the single-call arm.
+ - cli.py — eval flags: --arms single_call,best_of_n,self_refine,
+ --best-of-n N, --ablations.
+
+ Reuse: run_baseline, MeteringModelClient, evaluate_checks, judge_pair.
+
+ Phase 2 — Statistical layer (supporting; required to read Phase 1)
+
+ - New src/prompt_orchestrator/evaluation/stats.py (stdlib only): Wilson
+ interval, sign/binomial test, McNemar's test, bootstrap CI, and a sample-size
+ helper.
+ - Wire into EvalReport: per-arm pass-rate + Wilson CI; treatment-vs-control
+ win-rate + CI + p-value (McNemar on pass/fail, sign test on judge wins).
+ Render
+ in render_report_text.
+
+ Phase 3 — Judge integrity & variance (supporting)
+
+ - Optional dedicated judge role in config (roles.judge, falling back to
+ critic) so the judge can be a third-party strong model — small change in
+ config/models.py + judge.py.
+ - Both-order judging in judge.py (run A/B and B/A, average; flip ⇒ tie).
+ - Multi-trial support: --trials K in the harness; thread the API seed
+ through ModelRequest→extra_body for reproducibility; report per-arm variance.
+
+ Phase 4 — Reference-based metrics (optional / later, per user
+ deprioritization)
+
+ - Add optional reference/gold to EvalCase and metric checks (exact-match,
+ token-F1, JSON-schema validity) in a new metrics.py; add a small
+ human-calibration corpus + judge↔human agreement report.
+
+ ---
+ Files to modify / add
+
+ - New: evaluation/arms.py, evaluation/stats.py (Phase 2), metrics.py
+ (Phase 4).
+ - Modify: pipeline/runner.py (control-arm runners + per-arm toggles),
+ evaluation/harness.py (N-arm loop), evaluation/report.py (per-arm map +
+ compute ratios + stats), evaluation/judge.py + config/models.py (Phase 3
+ judge role + both-order), cli.py (eval flags), evaluation/corpus.py
+ (Phase 4 reference field).
+ - Tests/examples: extend examples/eval-scripted.yaml fixture with candidate/
+ selection/self_refine_* steps; new tests/test_eval_arms.py,
+ tests/test_eval_stats.py; extend tests/test_evaluation.py /
+ tests/test_cli_eval.py.
+
+ Verification
+
+ - Deterministic scripted run showing all arms + compute ratios:
+ selection/self_refine_* steps; new tests/test_eval_arms.py,
+ tests/test_eval_stats.py; extend tests/test_evaluation.py /
+ tests/test_cli_eval.py.
+
+ Verification
+
+
+     ---
+     Files to modify / add
+
+     - New: evaluation/arms.py, evaluation/stats.py (Phase 2), metrics.py
+     (Phase 4).
+     - Modify: pipeline/runner.py (control-arm runners + per-arm toggles),
+     evaluation/harness.py (N-arm loop), evaluation/report.py (per-arm map +
+     compute ratios + stats), evaluation/judge.py + config/models.py (Phase 3
+     judge role + both-order), cli.py (eval flags), evaluation/corpus.py
+     (Phase 4 reference field).
+     - Tests/examples: extend examples/eval-scripted.yaml fixture with
+     candidate/
+     selection/self_refine_* steps; new tests/test_eval_arms.py,
+     tests/test_eval_stats.py; extend tests/test_evaluation.py /
+     tests/test_cli_eval.py.
+
+     Verification
+
+     - Deterministic scripted run showing all arms + compute ratios:
+     python -m prompt_orchestrator eval --config 
+     examples/config.eval-scripted.yaml --corpus examples/eval-corpus.yaml 
+     --arms single_call,best_of_n,self_refine --best-of-n 3 --json → assert a
+     per-arm map, and that best-of-N's token ratio
+     approaches orchestration's (compute-matched).
+     - Unit tests for stats.py against hand-computed Wilson/McNemar/sign values.
+     - Judge both-order test: identical answers ⇒ tie; asymmetric ⇒ stable
+     winner
+     across orders.
+     - Gates stay green: ruff check, ruff format --check, mypy (src
+     strict-clean;
+     new tests add zero errors), full pytest with the venv on PATH.
+
+     Plan approved. The priority is Phase 1 (equal-compute arms) + Phase 2 (stats
+     to interpret them). Let me set up tasks and re-read the current (post-format)
+     files I'll modify.
+
+
+What was built (plan Phases 1–3)
+
+  The methodology question is answered in the plan file, and the harness was
+  extended from a two-arm counter into a fair, statistically-honest, N-arm 
+  comparison — leading with the equal-compute controls you prioritized.
+
+  The core idea, made runnable
+
+  The demo shows the payoff directly. All three arms pass the check, but the
+  report reframes the question from "does orchestration win?" to "is it worth 
+  the compute?":
+
+  ┌──────────────────────────┬───────┬────────┬───────────────┬────────────┐
+  │           arm            │ calls │ tokens │ compute ratio │ quality/1k │
+  ├──────────────────────────┼───────┼────────┼───────────────┼────────────┤
+  │ orchestrated (treatment) │ 3     │ 1690   │ —             │ 0.59       │
+  ├──────────────────────────┼───────┼────────┼───────────────┼────────────┤
+  │ best_of_3                │ 4     │ 1065   │ 0.63×         │ 0.94       │
+  ├──────────────────────────┼───────┼────────┼───────────────┼────────────┤
+  │ self_refine              │ 2     │ 560    │ 0.33×         │ 1.79       │
+  └──────────────────────────┴───────┴────────┴───────────────┴────────────┘
+
+  Here self-refine reaches the same quality at a third of the tokens — exactly
+  the "structure vs. spend" signal that a naive single-call baseline can't
+  reveal.
+
+  Delivered
+
+  - Equal-compute control arms (pipeline/runner.py): run_best_of_n (N candidates
+  + critic selection), run_self_refine (draft → self-critique in one model),
+  and with_overrides for no-critic / no-revision ablations — all sharing the
+  metered client so costs are comparable.
+  - Arm abstraction (evaluation/arms.py): Arm / ArmSpec / build_arms — treatment
+  first, then chosen controls + ablations.
+  - Statistics, stdlib-only (evaluation/stats.py): Wilson intervals,
+  sign/binomial test, McNemar, bootstrap, sample-size — all verified against
+  hand-computed values.
+  - N-arm harness + report (harness.py, report.py): per-arm pass-rate with 95% 
+  CI, token/latency cost, compute-ratio-vs-treatment, quality-per-1k, and paired
+  treatment-vs-control significance (McNemar on checks, sign test + win-rate CI
+  on the judge).
+  - Bias-controlled judge (judge.py): now judges each pair in both orders and
+  only declares a winner when they agree (else a flagged tie).
+  - CLI: eval --arms single_call,best_of_n,self_refine --best-of-n N --ablations
+  --judge --json.
+
+  Quality gates
+
+  - 179 tests pass (13 new across test_eval_arms.py, test_eval_stats.py, updated
+  eval tests), no network.
+  - ruff + ruff-format clean; mypy --strict clean on all src (59 files); new
+  tests add zero mypy errors (full-project count holds at the 30 pre-existing
+  errors in older test files).
+  - README, examples/README, and PROJECT_STATE updated.
+
+  Honest scope notes (deferred, per your deprioritization)
+
+  - Judge still reuses the critic role model (dedicated third-party judge role,
+  multi-trial + API seeds, and reference/gold metrics are the documented next
+  steps).
+  - The scripted example only scripts the single-call control; the other arms
+  need a live model or a matching fixture (the CLI test shows the exact per-arm
+  call sequence).
+
+  ------------------------------------------
+  
+  Stop developing new features.  I want to test the efficacy of the
+  orchestration.
+  Comparing absolute token usage is unimportant if the single prompt method
+  produces garbage.
+  This application is for taking weaker models (less than 50b parameters) and making
+  them more effective.
+  The reason there is only one model checking right now was because this
+  project is an MVP whose goal was to get all the pieces working together.
+                                                                                
+  The pieces are working.  How can I test that the concept is effective?
+  
+  ------------------------------------------
+  
+  The user is course-correcting: stop building, and the real goal is a quality
+  efficacy test — does orchestration make a weak (less than 50B) model meaningfully
+  better, regardless of token cost. Let me re-read the existing plan, then
+  verify a few facts about the current judge/config coupling before proposing a
+  testing protocol.
+  
+   I have what I need. The decisive fact: the judge is hard-wired to the critic
+  role, which orchestration itself uses — so there's no valid way today to
+  measure quality with an independent, stronger instrument without contaminating
+  the orchestrated arm. That's the crux of testing your concept. Two
+  clarifications shape the protocol:
+  
+  ● The user wants to clarify before answering. What would you like to clarify or
+  add? A few things that might be on your mind:
+
+  - On the judge: Do you already have access to a strong model (hosted API or a
+  big local one), or is a weak local model all you have right now? If the
+  latter, I can propose ways to still get signal.
+  - On "efficacy": What would convince you the concept works? A judge preferring
+  orchestrated answers more often? Passing objective task requirements a single
+  call fails? Closing the gap to a big model? Something else?
+  - On the target: Is there a specific less than 50B model + endpoint you're testing
+  against now, or should the protocol stay model-agnostic?
+  - On scope: When you say "stop developing new features" — does that also rule
+  out the small enabler needed to plug in an independent judge (so orchestration
+  stays pure-weak-model while a stronger model scores it), or is necessary test
+  infrastructure acceptable?
+  
+  Tell me whatever's on your mind and I'll reshape the questions/plan
+  accordingly.
+
+------------------------------------
+
+The goal is to have multiple models. The reason there is a single model right 
+  now is because the state of the project at the start of this session was      
+  simple get things to go through the pipeline.  Additional models had not yet  
+  been downloaded and configured.    
+
+  ---------------------------------------
+  
+  Got it — multi-model is the intended state; single-model is just where the
+  plumbing landed this session. That reframes things: the orchestration arm
+  should reflect your real multi-model config, and the key remaining question is
+  the judge (it must be stronger than, and separate from, the models in the
+  arms — otherwise it's grading its own family). Two quick decisions and I'll
+  write the protocol:
+
+User answered Claude's questions:
+  ⎿  · For scoring quality, what will act as the independent judge — a model 
+     stronger than, and not used by, either arm? (Today the judge is hard-wired 
+     to the critic role, so a distinct judge needs one small config/plumbing 
+     change.) → Distinct large local judge
+     · What result would convince you the concept works? → Passes objective lly 
+     checks
+     
+      Decisions noted: distinct large local judge (independent, private) and
+  objective checks as the primary success signal. That's a clean setup — and
+  importantly, the objective-check result needs zero new code; the judge is a
+  secondary signal that needs one small enabler. Let me write the protocol.
+     
+     The plan is written — a testing protocol, not more features. The headline: you
+  can measure the concept right now with zero new code using objective checks;
+  the distinct local judge is a secondary signal needing one small enabler.
+  
+   The product thesis is: staged orchestration makes a weak (less than 50B, local) model
+ produce materially better answers than that same weak model answering in one
+ shot. The single-model state in the repo is temporary plumbing, not a design
+ choice — the real deployment maps different local models to the understanding
+ /
+ worker / critic / revision roles. The pieces now work end-to-end; the task now
+ is
+ to measure the concept, not build more.
+
+ Chosen evaluation stance (from the user):
+ - Primary signal: objective checks. Does the orchestrated answer meet
+ per-task requirements (correctness, constraints, format) that the single call
+ fails? Absolute token cost is explicitly not the deciding factor — a cheap
+ answer that is garbage does not count.
+ - Secondary signal: a distinct large local judge (e.g. 70B+), reserved as
+ judge and used in no arm, for open-ended quality where checks under-determine.
+
+ The harness already exists (src/prompt_orchestrator/evaluation/): arms,
+ deterministic checks, paired stats (Wilson CI, sign, McNemar), a both-order
+ judge, and per-arm cost accounting. The main missing ingredient is a real
+ corpus, not more features.
+
+ Key finding that shapes this plan: the judge is currently hard-wired to the
+ critic role (judge.py → config.resolve_role(ModelRole.CRITIC)). Since the
+ critic is also part of orchestration, pointing it at the large judge model
+ would
+ give the orchestrated arm a strong critic and bias the result. So the distinct
+ judge requires one small decoupling change — but it is only needed for the
+ secondary signal.
+
+ ---
+ The efficacy question & decision rule
+
+ Question: On tasks with checkable requirements, does weak-model orchestration
+ satisfy requirements that the weak-model single call does not — significantly,
+ and without regressing easy tasks?
+
+ Pre-registered decision rule (adjust before running, not after):
+ - Effective if, over the corpus, orchestrated pass-rate > single-call
+ pass-rate with the paired McNemar p < 0.05 (treatment-only passes clearly
+ exceed control-only passes), and no significant regression on the "simple"
+ category (guards against over-engineering).
+ - Report per-category so wins/losses are visible where they happen.
+
+ ---
+ Step 1 — Objective-check efficacy run (NO new code)
+
+ This produces the primary result using only what exists.
+
+ 1. Configure the real multi-model orchestration in a live config (copy
+ examples/config.local-llama.yaml): map understanding/worker/critic/revision
+ to the intended local <50B models, provider = openai_compatible at your
+ llama-server/endpoint. The single_call control automatically uses the
+ worker model (the honest "one shot from the model you'd otherwise use").
+ 2. Author a real corpus (see next section) as a YAML file of EvalCases with
+ objective EvalChecks (corpus.py schema: must_include, must_avoid,
+ min_length, max_length, expect_status).
+ 3. Run (objective checks only, no judge, so no code needed):
+ prompt-orchestrator eval --config <live-multimodel.yaml> \
+     --corpus <corpus.yaml> --arms single_call --json > result.json
+ 4. Read the primary result from the report, which already computes it:
+   - arms.orchestrated.pass_rate + CI vs arms.single_call.pass_rate + CI.
+   - comparisons.single_call.treatment_only_passes /
+ control_only_passes / mcnemar_p (in report.py ComparisonAggregate).
+   - Repeat/split the corpus by category to get per-category tables.
+
+ Reused as-is: evaluate_checks (checks.py), ComparisonAggregate +
+ ArmAggregate (report.py), wilson_interval/mcnemar_p_value (stats.py),
+ the single_call arm (arms.py), PROMPT_ORCHESTRATOR_LIVE_CONFIG conventions
+ (tests/test_live_smoke.py).
+
+ ---
+ Corpus design — the real lever
+
+ Pick tasks where a weak single call plausibly fails a checkable requirement,
+ i.e. where structure should help most. Target ≥30–50 cases, spread across
+ categories, with enough per category to be non-anecdotal (stats.py
+ sample_size_for_win_rate gives guidance; a ~15-point win-rate needs dozens).
+
+ Suggested categories and the objective checks that catch failures:
+ - Multi-constraint instructions — must_include every required element,
+ must_avoid the forbidden ones (weak models drop constraints).
+ - Format/structure adherence — require literal markers (e.g. section
+ headings, ```json, required keys) via must_include.
+ - Factual precision / no hallucination — must_include the correct fact,
+ must_avoid the common wrong answer.
+ - Underspecified prompts — expect_status: clarification_required (does
+ orchestration correctly ask instead of guessing?).
+ - Safety-sensitive — expect_status: refused or required caution language.
+ - Simple direct questions — the regression guard: orchestration must not
+ break or bloat these.
+
+ Include a short rubric per case for the later judge step. Keep a hold-out
+ slice you don't inspect while tuning prompts, to avoid overfitting the eval.
+
+ I can scaffold a first-draft corpus across these categories for you to refine
+ (this is data authoring, not feature work).
+
+ ---
+ Step 2 — Add the independent local judge (one small enabler; secondary)
+
+ Only needed for open-ended quality beyond objective checks. This is the single
+ code change in this plan, and it is test infrastructure, not a product
+ feature.
+
+ - Decouple the eval judge from the critic role so it can point at a distinct
+ large local model that is used in no arm. Minimal approach: add an optional
+ judge model reference (e.g. roles.judge, defaulting to the critic model) in
+ config/models.py, add a JUDGE entry to ModelRole
+ (domain/enums.py) so ModelRequest/metering/resolve_role stay consistent,
+ and resolve it in judge.py (_judge_once). Keep the fallback so existing
+ configs and the scripted example are unchanged.
+ - Configure roles.judge → the 70B+ local model; keep the arms on the weak
+ models. Run with the judge on:
+ prompt-orchestrator eval --config <live-multimodel.yaml> \
+     --corpus <corpus.yaml> --arms single_call --judge --json
+ - The judge already runs both orders and reports win-rate + CI + sign test
+ (report.py ComparisonAggregate.judge_*). Treat it as corroboration of the
+ objective-check result, and calibrate it once against ~15–20 of your own
+ blind rankings before trusting it broadly.
+
+ ---
+ Optional framing: recover-the-gap ceiling
+
+ To show how effective, run a separate config where the worker is the large
+ model (--arms single_call) to get a strong single-call ceiling, and compare
+ the
+ weak-orchestrated pass-rate against it. No code needed — just another config.
+
+ ---
+ What NOT to do
+
+ No further harness features (no reference-metric module, no multi-trial/seed
+ work, no new arms) unless a measured gap in Step 1–2 demands it. The next
+ action
+ is data (corpus) + running against real models.
+
+ Verification
+
+ - Dry-run the pipeline with no network first to confirm wiring:
+ prompt-orchestrator eval --config examples/config.eval-scripted.yaml --corpus
+ examples/eval-corpus.yaml (should report per-arm pass-rates + McNemar).
+ - Live smoke: with the live multi-model config,
+ prompt-orchestrator run --config <live>.yaml "…" returns a completed answer
+ (mirrors tests/test_live_smoke.py).
+ - Real run: Step 1 command on the authored corpus; confirm per-arm pass-rate
+ CIs
+ and comparisons.single_call.mcnemar_p populate, and per-category tables.
+ - If Step 2's judge enabler is implemented: ruff check, ruff format --check,
+ mypy (src strict-clean), full pytest stay green; the scripted example still
+ runs unchanged (judge falls back to critic when roles.judge is unset).
+
+  
+  
+
