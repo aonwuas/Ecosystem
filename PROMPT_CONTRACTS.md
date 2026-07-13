@@ -71,13 +71,22 @@ The understanding model must:
 
 Exactly the `ExecutionPlan` schema in `DATA_MODELS.md`.
 
+The understanding prompt must include an exact nested JSON skeleton for the
+`ExecutionPlan`. In particular, `understanding`, `clarification`, and
+`output_contract` must be shown as objects, and list fields such as
+`quality_criteria` must be shown as arrays. The prompt must not rely on prose
+alone to describe nested fields.
+
 ### Repair prompt
 
 On invalid output, one repair request includes:
 
 - invalid response in delimiters;
 - validation error paths and messages;
-- required JSON shape;
+- the exact nested JSON skeleton;
+- explicit guidance that `understanding` must be an object, `clarification`
+  must contain `action` and `reason`, and `output_contract` must contain
+  `mode`, `structure`, `tone`, `length`, and `audience`;
 - instruction to return a corrected JSON object only.
 
 The repair model is the same configured understanding role in the MVP.
